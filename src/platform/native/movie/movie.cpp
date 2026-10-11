@@ -414,6 +414,8 @@ bool Platform::Movie::Step(Player* player)
 // A picture is presented every 1/rate seconds of the sound processor's clock
 void Platform::Movie::WaitFrame(Player* player)
 {
+    // A movie's frames are the game thread's too (its pace is the sound's, not the vertical blank's): the hang watch counts them
+    Native::GameFrameDone();
     ::Movie* movie = player->movie;
     if (movie != nullptr)
     {

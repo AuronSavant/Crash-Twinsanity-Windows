@@ -15,7 +15,7 @@ it:
   loop end, stop) and the decoder's queue NAX runs ahead with, the 4-point gaussian interpolation (the hardware's table,
   `gaussian.h`), the pitch counter and pitch modulation, the ADSR envelope's rates and curves, the volume sweeps, the noise
   generator, key on and off taking effect at the next sample, ENDX, IRQA (every address read or written, both cores), the reverb
-  (its 39 tap down/upsampling, the work area in SPU memory, every register), the cores' gates (MMIX, VMIX/VMIXE), the writes of
+  (its 39 tap down/upsampling, its work area, every register), the cores' gates (MMIX, VMIX/VMIXE), the writes of
   the voices and mixes into the memory's output areas, core 0's output into core 1's external input, the master volumes.
 - **The EE side is the PS2's.** `src/platform/ps2/audio.cpp`, `multistream/commands.cpp` and `multistream/streams.cpp` compile
   natively unchanged (`native/reused_ps2.txt`). The transport (`audio/multistream.cpp`) is the PS2's MsCommit, MsSend and
@@ -91,6 +91,27 @@ is GPL 3); the start-up log says which, with its licence.
 | The player's volumes, muting | No such thing | Applied after the game's volumes (above) | At 1 and unmuted: none |
 | Movie pictures | The IPU's decoding (its IDCT) and colour conversion, sent at the vertical blank every second blank | FFmpeg's decoding, the IPU's colour conversion, sent when the game presents, every 1/rate seconds of the SPU2's sample clock (25 a second: the movies' rate) | Pixel values can differ by the IDCTs' rounding; the movie keeps its pace and its sound whatever the display's rate (50 or 60 Hz) |
 | Output | The DACs, 48 kHz | SDL3 at 48 kHz, about 33 ms ahead | Latency |
+| The reverbs' work areas | In the sound memory, at its top | In memory of their own at the same addresses; STREAM.IRX's guards of the areas taken out (below) | A sound STREAM.IRX places where a reverb works plays (on the PS2 it's silent or garbled) |
+
+## A retail bug: sounds where a reverb works
+
+STREAM.IRX's allocator of the sound memory manages all of it, from its base (0x1D010) to the top (0x1FFFFF), the reverbs' work
+areas included. Those are at the top: the first core's reverb to come on works below 0x1FFFFF, the other's below 0x1DFFFF,
+each area as large as its mode (up to 0xF6C0 bytes, Space, for the modes the game uses). With the memory full enough, the
+allocator places sounds there, and the module loses them: it skips any transfer that reaches an area while its reverb is on
+(its own load of a sound, its compaction's reads, while it still counts the sound as there), it clears the area each time it
+sets a reverb, and the reverb writes over it all the time. The Italian voice banks are larger than the English, so in Italian
+the caverns' crystals (sounds 0x22D and 0x22E, loaded as Cortex's chunk comes) landed in the second core's area once the
+tunnel's reverb (Hall) was on: silent crystals (where a sound lands depends on what's loaded before it, so other crystals of
+the same level, or another run, could be fine).
+
+The native build keeps the reverbs' areas apart from the sounds: the SPU2's reverb reads and writes memory of its own at the
+same addresses (spu2.cpp's `g_EffectMemory`, an area cleared as its reverb comes on), and two of STREAM.IRX's instructions are
+changed as it loads (iop.cpp's `KeepReverbsApart`, checked against the module's words first): its check of a transfer's range
+no longer reads the areas' sizes, and its setting of a reverb no longer clears the area in the sound memory. The allocator is
+the PS2's, so the sounds go where they did, all of the memory stays usable, and a sound in an area plays. The reverb sounds as
+before: in the A/B of the caverns' route in English (no sound in an area there), the output with the reverb on is the same
+bit for bit, or a few samples apart where the old build's clear of the area (21 ms of the IOP's time) shifted what came after.
 
 ## Tests
 

@@ -2,10 +2,11 @@
 
 // The SPU2: the PS2's sound processor, emulated at its registers. Two cores of 24 voices playing PS-ADPCM out of 2 MB of memory
 // (Native::g_SpuMemory) with the gaussian interpolation, ADSR envelopes, volume sweeps, noise and pitch modulation, a reverb per
-// core working in its area of the memory, and each core's input from memory (AutoDMA). Every register is the hardware's: the
-// I/O processor's code (libsd) drives it through Read and Write at its addresses (0x1F900000 on), and transfers to and from its
-// memory through the I/O processor's DMA channels 4 and 7 (the IOP side calls the Dma functions). Tick makes one 48 kHz
-// sample. What it does follows the hardware as PCSX2's SPU2 (pcsx2/SPU2) has it; native/AUDIO.md lists the details
+// core working in its area (of memory of its own: on the PS2 it's the sound memory's), and each core's input from memory
+// (AutoDMA). Every register is the hardware's: the I/O processor's code (libsd) drives it through Read and Write at its
+// addresses (0x1F900000 on), and transfers to and from its memory through the I/O processor's DMA channels 4 and 7 (the IOP
+// side calls the Dma functions). Tick makes one 48 kHz sample. What it does follows the hardware as PCSX2's SPU2 (pcsx2/SPU2)
+// has it; native/AUDIO.md lists the details
 #include "common.h"
 
 namespace Spu2
@@ -59,6 +60,26 @@ void LogVoice(s32 voice);
 // Told of each voice keyed on (0-47) with its start address (halfwords), as the key on takes effect ($TWIN_SOUND_CHECK)
 using KeyOnObserver = void (*)(s32 voice, u32 startAddress);
 void SetKeyOnObserver(KeyOnObserver observer);
+// Told, with the key on observer set, what a voice keyed on put out once it stops (or after 2 s): its samples, its loudest
+// output (after its envelope, its volume and the player's), and whether it went to the dry mix and to the reverb
+using VoiceDoneObserver = void (*)(s32 voice, u32 samples, s32 peak, bool dry, bool reverb, s32 masterLeft, s32 masterRight,
+                                   u16 mmix);
+void SetVoiceDoneObserver(VoiceDoneObserver observer);
+// Told every second, with the key on observer set: the loudest of each core's voices' dry mix and of the output, and the gates
+// and volumes on the way (each core's MMIX and master volume, core 1's volume of core 0's output)
+struct MixPeaks
+{
+    s32 voices[2];
+    s32 output;
+    u16 mmix[2];
+    s32 master[2];
+    s32 external;
+};
+using MixObserver = void (*)(const MixPeaks& peaks);
+void SetMixObserver(MixObserver observer);
+// Told of each transfer to (written) or from the memory (not AutoDMA's input): the core, the address and the halfwords
+using TransferObserver = void (*)(s32 core, bool written, u32 address, u32 halfwords);
+void SetTransferObserver(TransferObserver observer);
 
 // One sample of output (both cores mixed, the master volume applied)
 Stereo Tick();

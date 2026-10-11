@@ -281,36 +281,56 @@ bool IsVoiceSound(u32 id)
            static_cast<const GameSound*>(voices->items[index])->soundId == id;
 }
 
-// $TWIN_SOUND_CHECK: each sound's samples where the SPU2 plays them from, compared with the first time it played (a sound whose
-// memory changed under it plays wrong). The sound a voice is asked for (PlaySound's batch), then its samples as it's keyed on
+// $TWIN_SOUND_CHECK (and the detailed log): each sound's samples where the SPU2 plays them from, compared with the first time it
+// played (a sound whose memory changed under it plays wrong), and what its voice put out; STREAM.IRX's work on the sound memory
+// (the banks read, loaded and freed, the compaction, the transfers, the reverbs on and off). The sound a voice is asked for
+// (PlaySound's batch), then its samples as it's keyed on
 std::mutex g_SoundCheckLock;
 u32 g_VoiceSound[48] = {};
+// The sound each voice was last keyed on with
+u32 g_VoicePlaying[48] = {};
 struct SoundSamples
 {
     u32 address;
     u32 blocks;
     u64 hash;
+    // Blocks whose samples aren't all 0 (a silent sound has none)
+    u32 sounding;
 };
 std::unordered_map<u32, SoundSamples> g_SoundSamples;
 
-bool SoundCheck()
+// $TWIN_SOUND_CHECK's own: also the mix's peaks every second and the transfers of the music's and voices' stream buffers (below
+// the sound memory, written many times a second)
+bool FullSoundCheck()
 {
     static const bool check = std::getenv("TWIN_SOUND_CHECK") != nullptr;
     return check;
 }
 
+bool SoundCheck()
+{
+    return FullSoundCheck() || Native::DetailedLog();
+}
+
+// Where STREAM.IRX's sound memory starts (halfwords: 0x1D010 bytes); the stream buffers are below
+constexpr u32 SoundMemoryStart = 0xE808;
+
 // The samples from address (halfwords) to the first block with the end flag (at most 4096 blocks): their count and hash
 SoundSamples Samples(u32 address)
 {
     const auto* memory = reinterpret_cast<const u16*>(Native::g_SpuMemory);
-    SoundSamples samples = {address, 0, 0xCBF29CE484222325ull};
+    SoundSamples samples = {address, 0, 0xCBF29CE484222325ull, 0};
     for (u32 block = 0; block < 4096; block++)
     {
         const u16* at = memory + ((address + block * 8) & Spu2::AddressMask);
+        bool sounding = false;
         for (u32 i = 0; i < 8; i++)
         {
             samples.hash = (samples.hash ^ at[i]) * 0x100000001B3ull;
+            sounding = sounding || (i != 0 && at[i] != 0);
         }
+
+        samples.sounding += sounding ? 1 : 0;
 
         samples.blocks++;
         if ((at[0] >> 8 & 1) != 0)
@@ -332,12 +352,13 @@ void CheckKeyOn(s32 voice, u32 address)
     }
 
     g_VoiceSound[voice] = 0;
+    g_VoicePlaying[voice] = sound;
     SoundSamples now = Samples(address);
     auto [first, added] = g_SoundSamples.try_emplace(sound, now);
     if (added)
     {
-        Native::Log("sound check: %#x first played on voice %d from %#x, %u blocks, hash %016llx", sound, voice, address,
-                    now.blocks, static_cast<unsigned long long>(now.hash));
+        Native::Log("sound check: %#x first played on voice %d from %#x, %u blocks (%u with samples), hash %016llx", sound, voice,
+                    address, now.blocks, now.sounding, static_cast<unsigned long long>(now.hash));
     }
     else if (first->second.hash != now.hash || first->second.blocks != now.blocks)
     {
@@ -348,10 +369,60 @@ void CheckKeyOn(s32 voice, u32 address)
     }
 }
 
+void CheckVoiceDone(s32 voice, u32 samples, s32 peak, bool dry, bool reverb, s32 masterLeft, s32 masterRight, u16 mmix)
+{
+    u32 sound;
+    {
+        std::lock_guard lock(g_SoundCheckLock);
+        sound = g_VoicePlaying[voice];
+        g_VoicePlaying[voice] = 0;
+    }
+
+    if (sound != 0)
+    {
+        Native::Log("sound check: %#x on voice %d sounded %u samples, peak %d%s%s; core %d's master %d/%d, mmix %03x", sound, voice,
+                    samples, peak, dry ? ", dry" : ", NOT in the dry mix", reverb ? ", to the reverb" : "", voice / 24, masterLeft,
+                    masterRight, mmix);
+    }
+}
+
+void CheckTransfer(s32 core, bool written, u32 address, u32 halfwords)
+{
+    if (!SoundCheck() || (address < SoundMemoryStart && !FullSoundCheck()))
+    {
+        return;
+    }
+
+    Native::Log("sound check: core %d's DMA %s %#x, %u halfwords (to %#x)", core, written ? "writes" : "reads", address, halfwords,
+                (address + halfwords) & Spu2::AddressMask);
+}
+
+// A second's mix: logged when something played (the gates and volumes said then too)
+void CheckMix(const Spu2::MixPeaks& peaks)
+{
+    if (peaks.voices[0] == 0 && peaks.voices[1] == 0)
+    {
+        return;
+    }
+
+    Native::Log("sound check: mix peaks: core 0's voices %d, core 1's %d, output %d; mmix %03x/%03x, master %d/%d, core 0 into core 1 %d",
+                peaks.voices[0], peaks.voices[1], peaks.output, peaks.mmix[0], peaks.mmix[1], peaks.master[0], peaks.master[1],
+                peaks.external);
+}
+
 // The commands that say what plays on a voice: a file opened, a stream of audio played or interleaved on, a sound played
 void Classify(const u16* batch)
 {
     auto word32 = [](const u16* words) { return static_cast<u32>(words[0]) << 16 | words[1]; };
+    // The SPU2's observers set the first time the check is on (the start-up's banks are read before anything plays)
+    if (SoundCheck())
+    {
+        static const bool observing = (Spu2::SetKeyOnObserver(CheckKeyOn), Spu2::SetVoiceDoneObserver(CheckVoiceDone),
+                                       Spu2::SetMixObserver(FullSoundCheck() ? CheckMix : nullptr),
+                                       Spu2::SetTransferObserver(CheckTransfer), true);
+        (void)observing;
+    }
+
     u32 at = 2;
     for (u32 command = 0; command < batch[1]; command++)
     {
@@ -384,12 +455,54 @@ void Classify(const u16* batch)
             SetKind(words[1], kind);
             break;
         }
+        case OpPatchSoundBank:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: bank %#x to be read to %#x", word32(words), word32(words + 2));
+            }
+            break;
+        case OpEnableEffect:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: core %u's reverb on, mode %u (its work area %#x bytes below %#x)", words[0], words[1],
+                            g_MsEffectSizesByMode[words[1] % 10], g_MsEffectAreaEnds[words[0] & 1]);
+            }
+            break;
+        case OpDisableEffect:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: core %u's reverb off", words[0]);
+            }
+            break;
+        case OpFreeSound:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: sound %#x freed", word32(words));
+            }
+            break;
+        case OpSoundBankLoaded:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: bank %#x loaded", words[0]);
+            }
+            break;
+        case OpCompactSoundMemory:
+            // (every 36 frames: $TWIN_SOUND_CHECK's only; what it moves is in the transfers)
+            if (FullSoundCheck())
+            {
+                Native::Log("sound check: the sounds' memory compacted a step");
+            }
+            break;
+        case OpAllocateSoundTable:
+            if (SoundCheck())
+            {
+                Native::Log("sound check: %u sounds reserved", words[0]);
+            }
+            break;
         case OpPlaySoundLoop:
             SetKind(words[2], IsVoiceSound(word32(words)) ? Kind::Voice : Kind::Effect);
             if (SoundCheck())
             {
-                static const bool observing = (Spu2::SetKeyOnObserver(CheckKeyOn), true);
-                (void)observing;
                 std::lock_guard lock(g_SoundCheckLock);
                 g_VoiceSound[words[2] % 48] = word32(words);
             }

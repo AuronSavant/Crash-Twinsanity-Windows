@@ -135,6 +135,53 @@ void HopFrame()
         return;
     }
 
+    // "goto:X:Y:Z": the player put there in its chunk
+    if (targets[next].rfind("goto:", 0) == 0)
+    {
+        Vector4 to = {0.0f, 0.0f, 0.0f, 1.0f};
+        std::sscanf(targets[next].c_str() + 5, "%f:%f:%f", &to.x, &to.y, &to.z);
+        Native::Log("hop: the player put at (%.1f, %.1f, %.1f) in %s", to.x, to.y, to.z, name.c_str());
+        ObjectPlace* place = player->place;
+        place->SyncPosition();
+        if (place->MoveTo(&to))
+        {
+            QueueObject(player);
+        }
+
+        next++;
+        lastHop = now;
+        return;
+    }
+
+    // "waitN": N seconds where it is before the next step
+    if (targets[next].rfind("wait", 0) == 0)
+    {
+        s32 seconds = std::atoi(targets[next].c_str() + 4);
+        Native::Log("hop: waiting %d s in %s", seconds, name.c_str());
+        next++;
+        lastHop = now + std::chrono::seconds(seconds) - std::chrono::seconds(2);
+        return;
+    }
+
+    // "die": the player dropped 200 units below where it is (it falls to its death; play starts again at its checkpoint)
+    if (targets[next] == "die")
+    {
+        ObjectPlace* place = player->place;
+        place->SyncPosition();
+        Vector4 below = place->position;
+        below.y -= 200.0f;
+        Native::Log("hop: the player dropped to its death from (%.1f, %.1f, %.1f) in %s", place->position.x, place->position.y,
+                    place->position.z, name.c_str());
+        if (place->MoveTo(&below))
+        {
+            QueueObject(player);
+        }
+
+        next++;
+        lastHop = now + std::chrono::seconds(8);
+        return;
+    }
+
     for (ChunkLinkData* link = chunk->links; link != nullptr; link = link->next)
     {
         ChunkData* linked = link->linkedData;

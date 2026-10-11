@@ -200,17 +200,25 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
   `$TWIN_SOUND_CHECK` logs them) and every file looked up on the disc. A crash's or a hang's stack names each function of the
   executable (its COFF symbol table, read from its file when the report needs it; C++'s names mangled, `llvm-cxxfilt` reads
   them) after its module and offset.
-- The hang watch (lowmemory_win32.cpp): a thread of its own counts the game thread's frames (its waits for the vertical blank).
+- The hang watch (lowmemory_win32.cpp): a thread of its own counts the game thread's frames (its waits for the vertical blank,
+  and a movie's frames, paced by the sound instead).
   When none finishes for 20 s, it writes to the log the game's state, the game thread's stack (the thread stopped while it's
   read) and the player's chunk, then says when the thread goes on. A hang that's ended by closing the game keeps its log: each
   start moves the last `log.txt` to `log.previous.txt`. `$TWIN_TEST_HANG=SECONDS` stops the game thread that long once play
   starts (its test).
-- `$TWIN_SOUND_CHECK`: every sound the game plays, logged with its pitch (the sound's own, the scale, what's sent) and volumes;
-  and its samples where the SPU2 plays them from, compared with its first play (a sound whose memory changed under it is said
-  "NOT as it first played").
+- `$TWIN_SOUND_CHECK` (and the detailed log): every sound the game plays, logged with its pitch (the sound's own, the scale,
+  what's sent) and volumes; its samples where the SPU2 plays them from (their blocks, those with samples, a hash), compared with
+  its first play (a sound whose memory changed under it is said "NOT as it first played"); what each voice put out once it
+  stops (its samples, its peak, whether to the dry mix and to the reverb); every transfer to and from the sound memory; and
+  STREAM.IRX's work on it (a bank's read and where to, its load, a sound freed, each core's reverb on and off with its area).
+  `$TWIN_SOUND_CHECK` also logs the mix's peaks every second, the compaction's steps and the stream buffers' transfers.
+  native/AUDIO.md has the bug they found. `$TWIN_SOUND_BLOCKS`: the
+  module's blocks of sound memory every 10 s. `$TWIN_TEST_SOUND=0x22e,0x22d`: those sounds played every 3 s of play from 5 s in
+  (`$TWIN_TEST_SOUND_DELAY`: from so many seconds).
 - The level sweep's tools for places it can't start in or reach: `$TWIN_HOP=cryscave,escape` takes the player through its
   chunk's link to each of those chunks in turn, as the game's WarpToChunkLinkTowardsPlayer places an instance (half a unit in
-  front of the link's load wall, where the link takes it). `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's
+  front of the link's load wall, where the link takes it); a step `goto:X:Y:Z` puts the player there, `wait5` waits 5 s and
+  `die` drops it to its death. `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's
   chunk (index, place, box); a list of steps (`4,die,4`) puts the player in a trigger or drops it to its death every 8 s, the
   lives kept up. `$TWIN_SWEEP_IDLE` gives no scripted input (cutscenes play out). `$TWIN_TEST_PICK=PATH` is the disc image
   dialog's pick (empty: cancelled).

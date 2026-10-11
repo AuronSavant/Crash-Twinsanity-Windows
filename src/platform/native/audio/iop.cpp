@@ -2445,6 +2445,36 @@ u16 Read16(const std::vector<u8>& file, u32 offset)
     return value;
 }
 
+// A retail bug of STREAM.IRX's: its allocator of the sound memory manages all of it, from its base to the top (0x1FFFFF), the
+// reverbs' work areas included. Those are at the top: the first core's reverb's below 0x1FFFFF, the second's below 0x1DFFFF,
+// each as large as its mode (up to 0xF6C0 bytes for the game's modes: game/sound.cpp's ReverbModeOf). With the memory full
+// enough (the Italian voice banks are larger), sounds are placed there, and the module loses them: it skips the transfers that
+// reach an area while its reverb is on (its own load of a sound and its compaction's reads, while it still counts the sound as
+// there), it clears the area as it turns the reverb on, and the reverb writes it all the time. So the caverns' crystals were
+// silent once the tunnel's reverb (Hall, the second core's) was on. The emulated SPU2 keeps the reverbs' areas in memory of
+// their own (spu2.cpp), so a sound is safe anywhere and the module's guards go: its check of a transfer's range (0xCAB4) no
+// longer reads the areas' sizes (it finds none), and its setting of a reverb (0xA414) no longer clears the area in the sound
+// memory (the SPU2 clears its own as the reverb comes on). The allocator, and so where the sounds go, is the PS2's
+constexpr u32 TransferCheckAt = 0xCAF8;
+constexpr u32 TransferCheckWord = 0x8C430000;  // lw $v1, 0($v0): the core's area's size
+constexpr u32 NoSize = 0x00001821;             // addu $v1, $zero, $zero
+constexpr u32 AreaClearAt = 0xA564;            // jal sceSdClearEffectWorkArea (its import's stub)
+constexpr u32 AreaClearStub = 0x12AFC;
+
+void KeepReverbsApart(u32 base)
+{
+    u32 clear = 0x0C000000 | (((base + AreaClearStub) >> 2) & 0x3FFFFFF);
+    if (Load<u32>(base + TransferCheckAt) != TransferCheckWord || Load<u32>(base + AreaClearAt) != clear)
+    {
+        Native::Log("iop: STREAM.IRX isn't the one known (its guards of the reverbs' areas left as they are)");
+        return;
+    }
+
+    Store<u32>(base + TransferCheckAt, NoSize);
+    Store<u32>(base + AreaClearAt, 0);
+    Native::Log("iop: STREAM.IRX's sounds and the reverbs' areas kept apart");
+}
+
 bool LoadModule(const char* path, u32* nextBase, Module* module)
 {
     Native::Disc::Entry entry;
@@ -2672,10 +2702,16 @@ bool Iop::Boot()
         }
 
         g_HeapStart = (next + AllocationAlignment - 1) & ~(AllocationAlignment - 1);
+        if (g_Debug)
+        {
+            Native::Log("iop: %s at %#x (its code %#x bytes)", path, module.base, module.textSize);
+        }
+
         LinkImports(module, module.textSize);
         if (std::strstr(path, "STREAM") != nullptr)
         {
             g_StreamBase = module.base;
+            KeepReverbsApart(module.base);
         }
 
         if (!StartModule(module))
@@ -2694,8 +2730,41 @@ bool Iop::Booted()
     return g_Booted;
 }
 
+// $TWIN_SOUND_BLOCKS: STREAM.IRX's sound memory blocks logged every 10 s of samples (its list at 0x1E460: an entry's address,
+// size, next, previous and whether it's taken, 20 bytes; the list's first at 0x13404, its base at 0x12EFC)
+void LogSoundBlocks()
+{
+    static const bool wanted = std::getenv("TWIN_SOUND_BLOCKS") != nullptr;
+    static u64 next = 0;
+    if (!wanted || g_StreamBase == 0 || g_SamplesMade < next)
+    {
+        return;
+    }
+
+    next = g_SamplesMade + 48000 * 10;
+    u32 table = g_StreamBase + 0x1E460;
+    s32 index = static_cast<s32>(Load<u32>(g_StreamBase + 0x13404));
+    std::string line;
+    u32 taken = 0;
+    for (u32 n = 0; n < 512 && index >= 0 && index < 512; n++)
+    {
+        u32 entry = table + static_cast<u32>(index) * 20;
+        u32 address = Load<u32>(entry);
+        u32 size = Load<u32>(entry + 4);
+        bool used = Load<u16>(entry + 0x10) != 0;
+        taken += used ? size : 0;
+        char text[48];
+        std::snprintf(text, sizeof(text), " %s%#x+%#x", used ? "" : "free ", address, size);
+        line += text;
+        index = static_cast<s16>(Load<u16>(entry + 0xC));
+    }
+
+    Native::Log("iop: sound memory from %#x: %u bytes taken;%s", Load<u32>(g_StreamBase + 0x12EFC), taken, line.c_str());
+}
+
 void Iop::RunSamples(u32 samples, std::vector<s16>* out)
 {
+    LogSoundBlocks();
     g_Output = out;
     u64 target = g_NextSample + static_cast<u64>(samples - 1) * Spu2::CyclesPerSample;
     Advance(target + 1);

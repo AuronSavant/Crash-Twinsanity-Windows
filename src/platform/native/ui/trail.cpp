@@ -12,6 +12,7 @@
 #include "game/place.h"
 #include "game/player.h"
 #include "game/reference.h"
+#include "game/sound.h"
 
 #include <chrono>
 #include <cstdio>
@@ -106,6 +107,39 @@ void NativeUi::TrailFrame()
     }
 
     Clock::time_point now = Clock::now();
+    // $TWIN_TEST_SOUND=0xae,0x63: those sounds played (as the game plays one, unplaced) every 3 s of play from 5 s in (the
+    // sound's tests)
+    static const char* testSounds = std::getenv("TWIN_TEST_SOUND");
+    static Clock::time_point playing{};
+    static Clock::time_point lastTest{};
+    if (testSounds != nullptr && state == GameController::StatePlaying)
+    {
+        if (playing == Clock::time_point{})
+        {
+            playing = now;
+        }
+
+        // ($TWIN_TEST_SOUND_DELAY: from so many seconds of play instead)
+        static const s32 delay = std::getenv("TWIN_TEST_SOUND_DELAY") != nullptr ? std::atoi(std::getenv("TWIN_TEST_SOUND_DELAY")) : 5;
+        if (now - playing >= std::chrono::seconds(delay) && now - lastTest >= std::chrono::seconds(3))
+        {
+            lastTest = now;
+            for (const char* at = testSounds; *at != '\0';)
+            {
+                char* end = nullptr;
+                u32 id = static_cast<u32>(std::strtoul(at, &end, 0));
+                if (end == at)
+                {
+                    break;
+                }
+
+                u32 channel = PlaySoundById(1.0f, -1.0f, id, 0, ListenerVoiceKind(), -1);
+                Native::Log("test sound: %#x played (%#x)", id, channel);
+                at = *end == ',' ? end + 1 : end;
+            }
+        }
+    }
+
     if (Native::DetailedLog() && state == GameController::StatePlaying && now - lastPlace >= std::chrono::seconds(5))
     {
         lastPlace = now;

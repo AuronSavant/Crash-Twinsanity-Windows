@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 namespace
@@ -21,6 +22,11 @@ u16* Memory()
 {
     return reinterpret_cast<u16*>(Native::g_SpuMemory);
 }
+
+// The reverbs' work areas, at the memory's addresses but apart from it: on the PS2 a reverb works in the sound memory, where
+// STREAM.IRX may have put sounds (iop.cpp's KeepReverbsApart); here it can't touch them. An area is cleared as its reverb comes
+// on (the module's setting of a reverb cleared it in the sound memory)
+u16 g_EffectMemory[Spu2::MemoryHalfwords];
 
 s32 Clamp16(s32 value)
 {
@@ -498,6 +504,23 @@ void UpdateNoise(Core& core)
     }
 }
 
+Spu2::KeyOnObserver g_KeyOnObserver = nullptr;
+Spu2::VoiceDoneObserver g_VoiceDoneObserver = nullptr;
+// What each voice keyed on puts out, while the observers watch
+struct VoiceMeter
+{
+    bool active;
+    bool dry;
+    bool reverb;
+    u32 samples;
+    s32 peak;
+};
+VoiceMeter g_Meters[48] = {};
+Spu2::MixObserver g_MixObserver = nullptr;
+Spu2::TransferObserver g_TransferObserver = nullptr;
+Spu2::MixPeaks g_MixPeaks = {};
+u32 g_MixSamples = 0;
+
 Stereo MixVoice(Core& core, s32 index)
 {
     Voice& voice = core.voices[index];
@@ -600,7 +623,17 @@ s32 Multiply(s32 a, s32 b)
 
 s16 ReadReverb(u32 address)
 {
-    return static_cast<s16>(Memory()[address]);
+    return static_cast<s16>(g_EffectMemory[address]);
+}
+
+void ClearEffectArea(const Core& core)
+{
+    u32 start = core.effectsStart & Spu2::AddressMask;
+    u32 end = ((core.effectsEnd & 0x3FFFFF) | 0xFFFF) & Spu2::AddressMask;
+    if (start <= end)
+    {
+        std::memset(g_EffectMemory + start, 0, (end - start + 1) * sizeof(u16));
+    }
 }
 
 Stereo DoReverb(Core& core, Stereo input)
@@ -663,10 +696,10 @@ Stereo DoReverb(Core& core, Stereo input)
     // The effect always runs, but writes its area only while it's enabled
     if (core.fxEnable)
     {
-        Memory()[sameDestination] = static_cast<u16>(Clamp16(same));
-        Memory()[diffDestination] = static_cast<u16>(Clamp16(diff));
-        Memory()[apf1] = static_cast<u16>(Clamp16(allPass1));
-        Memory()[apf2] = static_cast<u16>(Clamp16(allPass2));
+        g_EffectMemory[sameDestination] = static_cast<u16>(Clamp16(same));
+        g_EffectMemory[diffDestination] = static_cast<u16>(Clamp16(diff));
+        g_EffectMemory[apf1] = static_cast<u16>(Clamp16(allPass1));
+        g_EffectMemory[apf2] = static_cast<u16>(Clamp16(allPass2));
     }
 
     out = Clamp16(out);
@@ -748,6 +781,23 @@ VoiceMix MixVoices(Core& core)
     {
         Stereo out = MixVoice(core, index);
         u32 bit = 1u << index;
+        if (VoiceMeter& meter = g_Meters[core.index * 24 + index]; meter.active)
+        {
+            meter.samples++;
+            meter.peak = std::max({meter.peak, std::abs(out.left), std::abs(out.right)});
+            meter.dry = meter.dry || (core.vmixl & bit) != 0 || (core.vmixr & bit) != 0;
+            meter.reverb = meter.reverb || (core.vmixel & bit) != 0 || (core.vmixer & bit) != 0;
+            if (core.voices[index].envelope.phase == Envelope::Stopped || meter.samples >= 96000)
+            {
+                meter.active = false;
+                if (g_VoiceDoneObserver != nullptr)
+                {
+                    g_VoiceDoneObserver(core.index * 24 + index, meter.samples, meter.peak, meter.dry, meter.reverb,
+                                        core.masterLeft.value, core.masterRight.value, core.mmix);
+                }
+            }
+        }
+
         if ((core.vmixl & bit) != 0)
         {
             mix.dry.left += out.left;
@@ -856,8 +906,6 @@ Stereo MixCore(Core& core, const VoiceMix& voices, Stereo input, Stereo external
     return {dry.left + ApplyVolume(reverb.left, core.effectLeft), dry.right + ApplyVolume(reverb.right, core.effectRight)};
 }
 
-Spu2::KeyOnObserver g_KeyOnObserver = nullptr;
-
 void StartVoices(Core& core, u32 bits)
 {
     core.endx &= ~bits;
@@ -869,6 +917,7 @@ void StartVoices(Core& core, u32 bits)
             if (g_KeyOnObserver != nullptr)
             {
                 g_KeyOnObserver(core.index * 24 + index, core.voices[index].startAddress);
+                g_Meters[core.index * 24 + index] = {true, false, false, 0, 0};
             }
         }
     }
@@ -1065,9 +1114,15 @@ void WriteCore(Core& core, u32 offset, u16 value)
     case 0x19A:
     {
         bool hadDma = ((core.attr >> 4) & 3) != 0;
+        bool hadEffect = core.fxEnable;
         core.attr = value;
         core.irqEnable = (value & 0x40) != 0;
         core.fxEnable = (value & 0x80) != 0;
+        if (!hadEffect && core.fxEnable)
+        {
+            ClearEffectArea(core);
+        }
+
         core.noiseClock = static_cast<u8>((value >> 8) & 0x3F);
         if (((value >> 4) & 3) == 0 && (core.statx & 0x400) == 0)
         {
@@ -1387,6 +1442,21 @@ void Spu2::SetKeyOnObserver(KeyOnObserver observer)
     g_KeyOnObserver = observer;
 }
 
+void Spu2::SetVoiceDoneObserver(VoiceDoneObserver observer)
+{
+    g_VoiceDoneObserver = observer;
+}
+
+void Spu2::SetMixObserver(MixObserver observer)
+{
+    g_MixObserver = observer;
+}
+
+void Spu2::SetTransferObserver(TransferObserver observer)
+{
+    g_TransferObserver = observer;
+}
+
 void Spu2::SetVoiceGain(s32 voice, s32 gain)
 {
     g_Gains.gain[voice].store(gain, std::memory_order_relaxed);
@@ -1433,6 +1503,7 @@ void Spu2::Reset()
 
     ResetCore(g_Cores[0], 0);
     ResetCore(g_Cores[1], 1);
+    std::memset(g_EffectMemory, 0, sizeof(g_EffectMemory));
     std::memset(g_Plain, 0, sizeof(g_Plain));
     std::memset(g_SpdifRegisters, 0, sizeof(g_SpdifRegisters));
     g_Cycles = 0;
@@ -1503,6 +1574,11 @@ u32 Spu2::DmaWrite(s32 core, const u16* data, u32 halfwords)
 
     c.activeTsa = c.tsa & AddressMask;
     u32 start = c.activeTsa;
+    if (g_TransferObserver != nullptr)
+    {
+        g_TransferObserver(core, true, start, halfwords);
+    }
+
     for (u32 i = 0; i < halfwords; i++)
     {
         Memory()[(start + i) & AddressMask] = data[i];
@@ -1532,6 +1608,11 @@ u32 Spu2::DmaRead(s32 core, u16* data, u32 halfwords)
     Core& c = g_Cores[core];
     c.activeTsa = c.tsa & AddressMask;
     u32 start = c.activeTsa;
+    if (g_TransferObserver != nullptr)
+    {
+        g_TransferObserver(core, false, start, halfwords);
+    }
+
     for (u32 i = 0; i < halfwords; i++)
     {
         data[i] = Memory()[(start + i) & AddressMask];
@@ -1597,6 +1678,13 @@ Spu2::Stereo Spu2::Tick()
     }
 
     VoiceMix voices[2] = {MixVoices(g_Cores[0]), MixVoices(g_Cores[1])};
+    if (g_MixObserver != nullptr)
+    {
+        for (s32 i = 0; i < 2; i++)
+        {
+            g_MixPeaks.voices[i] = std::max({g_MixPeaks.voices[i], std::abs(voices[i].dry.left), std::abs(voices[i].dry.right)});
+        }
+    }
     Stereo external = MixCore(g_Cores[0], voices[0], inputs[0], {0, 0});
     external = Clamp16(external);
     external = {ApplyVolume(external.left, g_Cores[0].masterLeft.value), ApplyVolume(external.right, g_Cores[0].masterRight.value)};
@@ -1609,6 +1697,24 @@ Spu2::Stereo Spu2::Tick()
     out = {ApplyVolume(out.left, g_Cores[1].masterLeft.value), ApplyVolume(out.right, g_Cores[1].masterRight.value)};
     g_OutputPosition = (g_OutputPosition + 1) & 0x1FF;
     g_Cycles++;
+    if (g_MixObserver != nullptr)
+    {
+        g_MixPeaks.output = std::max({g_MixPeaks.output, std::abs(out.left), std::abs(out.right)});
+        if (++g_MixSamples >= 48000)
+        {
+            for (s32 i = 0; i < 2; i++)
+            {
+                g_MixPeaks.mmix[i] = g_Cores[i].mmix;
+                g_MixPeaks.master[i] = std::max(g_Cores[i].masterLeft.value, g_Cores[i].masterRight.value);
+            }
+
+            g_MixPeaks.external = std::max(g_Cores[1].externalLeft, g_Cores[1].externalRight);
+            g_MixObserver(g_MixPeaks);
+            g_MixPeaks = {};
+            g_MixSamples = 0;
+        }
+    }
+
     if (g_Muted.load(std::memory_order_relaxed))
     {
         return {0, 0};
