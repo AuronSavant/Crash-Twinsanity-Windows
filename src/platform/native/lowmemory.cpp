@@ -4,9 +4,12 @@
 // unmapped), so a load or store faulting below LowMemoryLimit is done here instead: the faulting instruction is decoded and
 // carried out on g_NativeLowMemory, and the program goes on after it. A jump or call through such an address crashes, as on the
 // PS2. g_NativeLowMemory holds zeros unless a dump of the PS2's (build/native/ps2_low_memory.bin) is given (native/NATIVE.md)
+// Windows: lowmemory_win32.cpp
+#if !defined(_WIN32)
 #include "native.h"
 
 #include <csignal>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <execinfo.h>
@@ -429,3 +432,20 @@ void NativeBadFree(void* memory, const void* pages, const void* pagesEnd)
         backtrace_symbols_fd(frames, backtrace(frames, 24), 2);
     }
 }
+
+bool NativeDebugHeap()
+{
+    static const bool debug = std::getenv("TWIN_DEBUG_HEAP") != nullptr;
+    return debug;
+}
+
+void NativeHeapProblem(const char* what, void* memory)
+{
+    char message[160];
+    int length = std::snprintf(message, sizeof(message), "[native] heap: %s (%p):\n", what, memory);
+    ::write(2, message, static_cast<size_t>(length));
+    void* frames[16];
+    backtrace_symbols_fd(frames, backtrace(frames, 16), 2);
+}
+#endif
+

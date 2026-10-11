@@ -1,6 +1,7 @@
 #include "game/shapes.h"
 
 #include "game/colour.h"
+#include "game/graphicstables.h"
 #include "game/memory.h"
 #include "game/renderer.h"
 #include "game/stream.h"
@@ -218,6 +219,18 @@ void Shape2D::Read(Stream* stream)
     s32 materialId;
     stream->ReadS32(&textureId);
     stream->ReadS32(&materialId);
+#ifdef TWIN_NATIVE
+    // Retail bug: a texture already loaded (a level's title picture's, which the icons' title of the level has too) isn't read,
+    // so the material is read from its bytes (a name's length of 16 MB: a crash). Its bytes are skipped, and it's referenced as
+    // a texture read is (the release below is that reference's)
+    if (TextureTable::Entry* known = g_TextureTable.Find(static_cast<u32>(textureId)); known != nullptr && known->item != nullptr)
+    {
+        u32 size;
+        stream->ReadU32(&size);
+        stream->Skip(static_cast<s32>(size));
+        TakeReference(known->item);
+    }
+#endif
     GameTexture* texture = TextureFromStream(static_cast<u32>(textureId), stream);
     resource = MaterialFromStream(static_cast<u32>(materialId), stream);
     CallVirtual<void>(this, vtable, Shape2D::SetMaterialByIdSlot, static_cast<u32>(materialId));

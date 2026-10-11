@@ -23,7 +23,29 @@ sys.path.insert(0, str(ROOT / "tools"))
 import dump_texts  # noqa: E402
 import local_config  # noqa: E402
 
-APP = ROOT / "build/native/cmake/Crash Twinsanity.app/Contents/MacOS/Crash Twinsanity"
+WINDOWS = os.name == "nt"
+APP = (ROOT / "build/native/cmake/CrashTwinsanity.exe" if WINDOWS else
+       ROOT / "build/native/cmake/Crash Twinsanity.app/Contents/MacOS/Crash Twinsanity")
+
+
+def symbolize(text, app):
+    """Windows' crash reports give return addresses as module+offset (lowmemory_win32.cpp): the executable's ones get their
+    function names and lines from llvm-symbolizer, added under each"""
+    frames = re.findall(r"^  #\d+ +[0-9a-f]+ " + re.escape(Path(app).name) + r"\+0x([0-9a-f]+)$", text, re.M)
+    if not frames:
+        return text
+    import shutil
+    tool = shutil.which("llvm-symbolizer")
+    if tool is None:
+        return text
+    base = 0x10000000
+    addresses = [hex(base + int(f, 16)) for f in frames]
+    output = subprocess.run([tool, "--obj=" + str(app), "-f", "-i"] + addresses, capture_output=True, text=True).stdout
+    # llvm-symbolizer answers each address with its frames' lines and a blank line
+    blocks = [" ".join(b.split()) for b in re.split(r"\n\s*\n", output.strip())]
+    names = dict(zip(frames, blocks))
+    return re.sub(r"^(  #\d+ +[0-9a-f]+ " + re.escape(Path(app).name) + r"\+0x([0-9a-f]+))$",
+                  lambda m: m.group(1) + "  " + names.get(m.group(2), ""), text, flags=re.M)
 
 
 def level_chunks():
@@ -51,16 +73,20 @@ def run(chunk, out, seconds, timeout):
         old.unlink()
     home = folder / "home"
     home.mkdir(exist_ok=True)
+    # (Windows keeps the settings in APPDATA)
     environment = dict(os.environ, TWINSANITY_AUDIO="off", TWIN_SWEEP_LEVEL=chunk, TWIN_SWEEP_SECONDS=str(seconds),
-                       TWIN_SWEEP_TIMEOUT=str(timeout), HOME=str(home))
+                       TWIN_SWEEP_TIMEOUT=str(timeout), HOME=str(home), APPDATA=str(home))
     started = time.time()
     with open(folder / "log.txt", "w") as log:
         try:
             process = subprocess.run([str(APP), "--headless", "--quiet-stubs", "--snapshots", str(folder)], env=environment,
-                                     stdout=log, stderr=subprocess.STDOUT, timeout=timeout + seconds * 6 + 60)
+                                     stdout=log, stderr=subprocess.STDOUT, timeout=timeout + seconds * 6 + 60, cwd=ROOT)
             status = process.returncode
         except subprocess.TimeoutExpired:
             status = "timeout"
+    if WINDOWS:
+        text = (folder / "log.txt").read_text(errors="replace")
+        (folder / "log.txt").write_text(symbolize(text, APP))
     return parse(chunk, folder, status, round(time.time() - started, 1))
 
 
@@ -71,7 +97,7 @@ def parse(chunk, folder, status, wall):
     frees = len(re.findall(r"a free of 0x[0-9a-f]+, outside", text))
     loaded = re.search(r"sweep: state 9 at ([\d.]+) s", text)
     playing = re.search(r"sweep: state (?:12|13|14) at ([\d.]+) s", text)
-    ran = re.search(r"sweep: .*: (ran|no character in the chunk|never played[^(]*\(state \d+\)) \(([\d.]+) s played, (\d+) frames\)", text)
+    ran = re.search(r"sweep: .*: (ran|game over|no character in the chunk|never played[^(]*\(state \d+\)) \(([\d.]+) s played, (\d+) frames\)", text)
     states = re.findall(r"sweep: state (\d+) at", text)
     # Play started in a chunk without the played character: the start's follow camera restarted through a null rig
     # (FollowCameraRig::Restart from GameController::StartingPlay), before any play. The game only enters these from a neighbour
@@ -101,6 +127,8 @@ def report(results, path):
         world, area, name = (parts[1], parts[2], parts[3]) if len(parts) == 4 else ("", "", chunk)
         if result["outcome"] == "ran":
             status = "OK"
+        elif result["outcome"] == "game over":
+            status = "OK (game over)"
         elif result["outcome"] == "no character in the chunk":
             status = "Entered from a neighbour"
         elif result["fatal"]:
@@ -127,7 +155,11 @@ def main():
     parser.add_argument("--resume", action="store_true", help="skip the chunks OUT/results.json has already")
     parser.add_argument("--reparse", action="store_true", help="the results made again from OUT's logs (no runs)")
     parser.add_argument("--report", help="write the markdown table of OUT/results.json to this file and stop")
+    parser.add_argument("--app", help="the native build's executable")
     arguments = parser.parse_args()
+    if arguments.app:
+        global APP
+        APP = Path(arguments.app)
     out = Path(arguments.out)
     if arguments.reparse:
         results = json.loads((out / "results.json").read_text())

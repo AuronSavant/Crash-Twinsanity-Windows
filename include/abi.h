@@ -2,6 +2,7 @@
 
 #include "common.h"
 
+#include <tuple>
 #include <type_traits>
 
 // The retail code passes arguments the way GCC 2.9x's EABI does: integers and pointers in $a0-$a7 in their order, floats in
@@ -14,7 +15,16 @@
 // - EABI_IMPORT(name, function): an asm function, for the C++ that calls it through its declaration.
 //
 // Calls through the retail vtables and function pointers use the EABI's registers whatever is behind them (CallEabi).
-#ifdef TWIN_NATIVE
+#if defined(TWIN_NATIVE) && defined(_WIN32)
+// Windows' x64 convention gives an argument the register of its position whatever its kind (rcx or xmm0, rdx or xmm1...), so
+// a retail call with the EABI's order (the object, then the floats among the integers anywhere) misses a function declared in
+// another: the functions the retail code calls with floats and integers mixed take the System V convention there, which, as the
+// EABI, AAPCS64 (macOS) and Linux's, fills the integers' and the floats' registers each in their own order. Calls through the
+// retail vtables and pointers with mixed arguments go the same way (CallEabi, gcc2.h's CallVirtual)
+#define TWIN_EABI_CC __attribute__((sysv_abi))
+#define RETAIL_N32(name) RETAIL(name) TWIN_EABI_CC
+#elif defined(TWIN_NATIVE)
+#define TWIN_EABI_CC
 #define RETAIL_N32(name) RETAIL(name)
 #else
 #define RETAIL_N32(name) asm(#name "_n32")
@@ -220,11 +230,116 @@ template <typename... Args>
 constexpr bool IsMixed = (IsFloat<Args> || ...) && !(IsFloat<Args> && ...);
 
 #ifdef TWIN_NATIVE
-// The native build's functions all take their arguments one way: a call through a retail vtable or function pointer is a call
+// A pointer to a function taking these arguments as the retail code passes them: the host's own convention, or the EABI's
+// stand-in (TWIN_EABI_CC) when they mix floats and integers
+template <typename Result, typename... Args>
+struct EabiPointer
+{
+    using Type = Result (*)(Args...);
+};
+
+#ifdef _WIN32
+template <typename Result, typename... Args>
+    requires IsMixed<Args...>
+struct EabiPointer<Result, Args...>
+{
+    using Type = Result(TWIN_EABI_CC*)(Args...);
+};
+#endif
+
+#ifdef _WIN32
+// The functions declared RETAIL_N32 (System V's), by address (src/platform/native/abi_win32.cpp, made before main)
+constexpr u32 SysvTableSize = 2048;
+extern const void* g_SysvTable[SysvTableSize];
+
+inline u32 SysvSlot(const void* function)
+{
+    return static_cast<u32>((reinterpret_cast<u64>(function) * 0x9E3779B97F4A7C15ull) >> 53);
+}
+
+inline bool IsSysvFunction(const void* function)
+{
+    for (u32 slot = SysvSlot(function);; slot = (slot + 1) & (SysvTableSize - 1))
+    {
+        const void* held = g_SysvTable[slot];
+        if (held == function)
+        {
+            return true;
+        }
+
+        if (held == nullptr)
+        {
+            return false;
+        }
+    }
+}
+
+// An argument a function in Windows' own convention gets: its floats are none (it takes none: one taking floats and integers
+// is RETAIL_N32's)
+template <typename T>
+inline auto KeptArgument(T value)
+{
+    if constexpr (IsFloat<T>)
+    {
+        return std::tuple<>();
+    }
+    else
+    {
+        return std::tuple<T>(value);
+    }
+}
+
+// $TWIN_ABI_TRACE: each function called across the conventions logged once (a mixed call to one of Windows' own, or a call
+// without floats and integers mixed to one of System V's)
+extern bool g_TraceCrossCalls;
+void NoteCrossCall(const void* function, bool mixed);
+// --selftest-abi (src/platform/native/abi_win32.cpp)
+int SelfTest();
+
+template <typename Result, typename... Kept>
+inline Result CallKept(const void* function, std::tuple<Kept...> kept)
+{
+    return std::apply(reinterpret_cast<Result (*)(Kept...)>(const_cast<void*>(function)), kept);
+}
+#endif
+
+// The native build's functions all take their arguments one way: a call through a retail vtable or function pointer is a call.
+// On Windows the call goes the way of the function behind the pointer, whatever its arguments: a vtable's slot can hold a
+// function taking a float with its integers (System V's) and one that leaves the float out (Windows'), as the slot's caller
+// passes it to both (the EABI passes the integers alike either way)
 template <typename Result, typename... Args>
 inline Result CallEabi(const void* function, Args... args)
 {
-    return reinterpret_cast<Result (*)(Args...)>(const_cast<void*>(function))(args...);
+#ifdef _WIN32
+    if (IsSysvFunction(function))
+    {
+        if constexpr (!IsMixed<Args...>)
+        {
+            if (g_TraceCrossCalls)
+            {
+                NoteCrossCall(function, false);
+            }
+        }
+
+        return reinterpret_cast<Result(TWIN_EABI_CC*)(Args...)>(const_cast<void*>(function))(args...);
+    }
+
+    if constexpr (IsMixed<Args...>)
+    {
+        if (g_TraceCrossCalls)
+        {
+            NoteCrossCall(function, true);
+        }
+
+        return CallKept<Result>(function, std::tuple_cat(KeptArgument(args)...));
+    }
+    else
+    {
+        return reinterpret_cast<Result (*)(Args...)>(const_cast<void*>(function))(args...);
+    }
+#else
+    return reinterpret_cast<typename EabiPointer<Result, Args...>::Type>(const_cast<void*>(function))(args...);
+#endif
 }
 #else
 // Calls an EABI function through a pointer: CallEabiTrampoline (src/abi.cpp) loads the arguments' registers from these arrays.

@@ -18,7 +18,9 @@
 #include <bit>
 #include <array>
 #include <cmath>
+#include <type_traits>
 #include <utility>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -192,8 +194,31 @@ void Gs::SetUpState(DrawState& state, const Vertex*)
 
 void Gs::DrawPrimitive(const Vertex* vertexes, u32 count)
 {
+    // The state made from the registers kept while none of them is written (a strip's triangles, a mesh's): the GS's of this
+    // thread, by generation (Gs::WriteRegister)
+    struct StateCache
+    {
+        const Gs* gs = nullptr;
+        u64 generation = 0;
+        DrawState state;
+    };
+    thread_local StateCache cache;
+    static const bool caching = std::getenv("TWIN_GS_STATE_CACHE") == nullptr || std::getenv("TWIN_GS_STATE_CACHE")[0] != '0';
     DrawState state;
-    SetUpState(state, &vertexes[count - 1]);
+    // (Copied inline: the C library's memcpy, called for a struct this big, cost more than the state's making saved)
+    static_assert(std::is_trivially_copyable_v<DrawState>);
+    if (caching && cache.gs == this && cache.generation == stateGeneration_)
+    {
+        __builtin_memcpy_inline(&state, &cache.state, sizeof(DrawState));
+    }
+    else
+    {
+        SetUpState(state, &vertexes[count - 1]);
+        cache.gs = this;
+        cache.generation = stateGeneration_;
+        __builtin_memcpy_inline(&cache.state, &state, sizeof(DrawState));
+    }
+
     primitivesDrawn++;
     // Debugging: TWIN_GS_DUMP_AT=PRIM,BP,BW,PSM,W,H[;...] (hex BP and PSM) writes that buffer's values, as local memory holds
     // them just before primitive PRIM, to gsdump_PRIM_BP.bin (a u32 a pixel, row by row) in
@@ -298,6 +323,13 @@ void Gs::DrawPrimitive(const Vertex* vertexes, u32 count)
                      static_cast<unsigned long long>(primitivesDrawn), state.type, state.fbp, state.fbw, state.fpsm,
                      static_cast<unsigned long long>(state.textured ? c.tex0.value : 0), static_cast<unsigned long long>(c.test.value),
                      static_cast<unsigned long long>(state.blend ? c.alpha.value : 0), frame, depth);
+        static const bool printVertexes = std::getenv("TWIN_PIXEL_WATCH_VERTEXES") != nullptr;
+        for (u32 i = 0; printVertexes && i < count; i++)
+        {
+            const Vertex& v = vertexes[i];
+            std::fprintf(stderr, "watch:   v %.4f,%.4f z %x rgba %02x%02x%02x%02x uv %.3f,%.3f stq %g,%g,%g\n", v.x / 16.0,
+                         v.y / 16.0, v.z, v.r, v.g, v.b, v.a, v.u / 16.0, v.v / 16.0, v.s, v.t, v.q);
+        }
     };
 
     // A backend draws it, or leaves it to the software rasteriser (having made local memory current for it)

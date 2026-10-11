@@ -542,9 +542,20 @@ void FindFrames(AnimationData* data, u32 frame, u32 next)
     data->statics = statics;
     // The frames' values follow the static values
     AnimationLayout layout = information->layout;
+#ifdef TWIN_NATIVE
+    // The PS2's 32 bit addresses: a frame before the first (an index wrapped below 0) is the values before it, not 4 GB on
+    auto frameAt = [statics](u32 values) {
+        return reinterpret_cast<const s16*>(reinterpret_cast<std::uintptr_t>(statics) +
+                                            static_cast<std::intptr_t>(static_cast<s32>(values * sizeof(s16))));
+    };
+    data->current = frameAt(layout.staticValues + frame * layout.frameValues);
+    layout = data->information->layout;
+    data->next = frameAt(layout.staticValues + next * layout.frameValues);
+#else
     data->current = statics + layout.staticValues + frame * layout.frameValues;
     layout = data->information->layout;
     data->next = statics + layout.staticValues + next * layout.frameValues;
+#endif
 }
 
 void SetAnimationData(AnimationStatus* status, u32 main)
@@ -556,6 +567,15 @@ void SetAnimationData(AnimationStatus* status, u32 main)
     }
 
     f32 through = static_cast<f32>(status->time) * g_SecondsPerClockUnit / (static_cast<f32>(status->length) * g_SecondsPerClockUnit);
+#ifdef TWIN_NATIVE
+    // An animation of no length (0 / 0: the host's NaN, which the frame's index takes as 0x80000000) at its first frame. The PS2's
+    // FPU has no NaN: its 0 / 0 is the largest float, the frame's index 0x7FFFFFFF, and the joints read the values before the
+    // frames (a pose of nothing for that frame)
+    if (!(through == through) || through > 3.0e38f || through < -3.0e38f)
+    {
+        through = 0.0f;
+    }
+#endif
     u32 frames = status->bits.frames;
     u32 last = frames - 1;
     f32 position;

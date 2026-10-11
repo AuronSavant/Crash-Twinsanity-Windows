@@ -71,6 +71,7 @@ public:
 
 private:
     void Execute(u32 code, const u32* data);
+    void ExecuteNow(u32 code, const u32* data);
     void Unpack(u32 code, const u32* data, u32 words);
     void StartProgram(u32 address, bool resume);
     u32 DataWords(u32 code) const;
@@ -84,4 +85,7 @@ private:
     u32 pendingWords_ = 0;
     std::vector<u32> pendingData_;
 };
+
+// $TWIN_VIF_HISTORY: VIF1's last codes written to a file (vu1translate.cpp's runaway report)
+void DumpVifHistory(const char* path);
 }

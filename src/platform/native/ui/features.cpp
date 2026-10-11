@@ -33,6 +33,10 @@ namespace
 // The game clock's frames a second, which sizes the frame's work budget (GameTimeHasTimeLeft): main.cpp's PAL 50, NTSC 60
 constexpr s32 PalFramesPerSecond = 50;
 constexpr s32 NtscFramesPerSecond = 60;
+// The option's rates past 60 (as fast as the computer goes: the clock's work budget a 240th of a second)
+constexpr s32 FrameRates[] = {PalFramesPerSecond, NtscFramesPerSecond, 120, 144, 0};
+constexpr s32 UnlimitedBudgetRate = 240;
+constexpr f32 GameTick = 1.0f / 60.0f;
 }
 
 void ApplyOption(Option option)
@@ -44,10 +48,11 @@ void ApplyOption(Option option)
         bool ntsc = IsOn(OptionRefresh60);
         if (G_GameClockController != nullptr)
         {
-            G_GameClockController->framesPerSecond = ntsc ? NtscFramesPerSecond : PalFramesPerSecond;
+            G_GameClockController->framesPerSecond = FrameRate() != 0 ? FrameRate() : UnlimitedBudgetRate;
         }
 
         NativeGraphics::SetVideoMode(!ntsc);
+        NativeGraphics::SetFrameRate(FrameRate());
         break;
     }
     case OptionTextureFilter:
@@ -337,6 +342,11 @@ bool MovieSkipHeld()
     return SkipHoldComplete();
 }
 
+f32 SkipHoldSecondsForTest()
+{
+    return SkipHoldSeconds;
+}
+
 void SkipHoldForTest(bool forced, const std::vector<s32>& inputs, f32 seconds)
 {
     static SkipClock::time_point base = SkipClock::now();
@@ -365,5 +375,36 @@ f32 CameraShakeScale()
 s32 FramesPerSecond(s32 retail)
 {
     return IsOn(OptionRefresh60) ? NtscFramesPerSecond : retail;
+}
+
+s32 FrameRate()
+{
+    return FrameRates[std::clamp(GetOption(OptionRefresh60), 0, 4)];
+}
+
+u32 GameTicks(f32 seconds, f32* carried)
+{
+    const s32 rate = FrameRate();
+    if (rate == PalFramesPerSecond || rate == NtscFramesPerSecond)
+    {
+        *carried = 0.0f;
+        return 1;
+    }
+
+    // At most a few at once (a long frame: the game's own steps are capped at two frames' time too)
+    *carried += std::max(seconds, 0.0f);
+    u32 ticks = 0;
+    while (*carried >= GameTick && ticks < 4)
+    {
+        *carried -= GameTick;
+        ticks++;
+    }
+
+    if (ticks == 4)
+    {
+        *carried = 0.0f;
+    }
+
+    return ticks;
 }
 }

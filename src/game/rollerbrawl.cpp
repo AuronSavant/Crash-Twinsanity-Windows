@@ -171,6 +171,9 @@ void StartQuery(InstanceQuery* query, void** results, u16 most, u32 wanted)
 // The object node's AgentRef2 (an asleep one forgotten unless the node keeps it)
 InstanceContext* AwakeAgentRef2(ObjectNode* node)
 {
+#ifdef TWIN_NATIVE
+    ForgetFreedInstance(&node->agentRef2);
+#endif
     InstanceContext* other = node->agentRef2;
     if (other != nullptr && other->flags.asleep && !node->flags.keepsAgentRef2)
     {

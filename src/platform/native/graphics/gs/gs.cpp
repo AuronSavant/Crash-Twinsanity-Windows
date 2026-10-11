@@ -4,6 +4,7 @@
 #include "backend.h"
 #include "workers.h"
 
+#include <atomic>
 #include <functional>
 
 #include "../state.h"
@@ -26,6 +27,9 @@ f32 AsFloat(u32 bits)
 
 Gs::Gs()
 {
+    // Each GS's generations its own (DrawPrimitive's cache keeps the GS it was made for, which a new one may reuse the place of)
+    static std::atomic<u64> instances{0};
+    stateGeneration_ = (instances.fetch_add(1) + 1) << 40;
     vm_ = static_cast<u8*>(std::calloc(1, LocalMemoryBytes));
     prmodecont_ = 1;
     rgbaq_.q = std::bit_cast<u32>(1.0f);
@@ -72,6 +76,7 @@ void Gs::PrepareCpuRect(bool write, u32 psm, u32 bp, u32 bw, s32 left, s32 top, 
 template <typename Io>
 void Gs::Serialize(Io& io)
 {
+    stateGeneration_++;
     io.Bytes(vm_, LocalMemoryBytes);
     io.Field(pmode);
     io.Field(smode2);
@@ -141,6 +146,28 @@ void Gs::ResetQueue()
 
 void Gs::WriteRegister(u32 address, u64 value)
 {
+    // Every register but the vertexes' and the transfers' is part of a primitive's DrawState (SetUpState): its cache made stale
+    switch (address)
+    {
+    case RGBAQ:
+    case ST:
+    case UV:
+    case XYZF2:
+    case XYZF3:
+    case XYZ2:
+    case XYZ3:
+    case FOG:
+    case BITBLTBUF:
+    case TRXPOS:
+    case TRXREG:
+    case TRXDIR:
+    case TEXFLUSH:
+        break;
+    default:
+        stateGeneration_++;
+        break;
+    }
+
     switch (address)
     {
     case PRIM:

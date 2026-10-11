@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace Ee
@@ -149,7 +150,97 @@ void Vif::StartProgram(u32 address, bool resume)
     vu_.Run(resume ? vu_.pc() : address);
 }
 
+namespace
+{
+// $TWIN_VIF_HISTORY: VIF1's last codes kept (each with the registers before it, the row after it and its data's first words),
+// written out when a VU1 program runs away (DumpVifHistory, from vu1translate.cpp's report)
+struct VifRecord
+{
+    u64 serial;
+    u32 code;
+    u32 mode;
+    u32 mask;
+    u32 cycleLength;
+    u32 writeLength;
+    u32 tops;
+    u32 rowBefore[4];
+    u32 rowAfter[4];
+    u32 words;
+    u32 data[8];
+};
+constexpr u32 HistorySize = 256;
+VifRecord g_History[HistorySize];
+u64 g_HistorySerial = 0;
+
+bool HistoryOn()
+{
+    static const bool on = std::getenv("TWIN_VIF_HISTORY") != nullptr;
+    return on;
+}
+}
+
+void DumpVifHistory(const char* path)
+{
+    if (!HistoryOn())
+    {
+        return;
+    }
+
+    FILE* file = std::fopen(path, "w");
+    if (file == nullptr)
+    {
+        return;
+    }
+
+    u64 first = g_HistorySerial > HistorySize ? g_HistorySerial - HistorySize : 0;
+    for (u64 serial = first; serial < g_HistorySerial; serial++)
+    {
+        const VifRecord& r = g_History[serial % HistorySize];
+        std::fprintf(file, "#%llu code %08x (cmd %02x num %u addr %#x%s) mode %u mask %08x cl %u wl %u tops %#x row %x %x %x %x -> %x %x %x %x;"
+                           " %u words:",
+                     static_cast<unsigned long long>(r.serial), r.code, (r.code >> 24) & 0x7F, (r.code >> 16) & 0xFF, r.code & 0x3FF,
+                     (r.code >> 15) & 1 ? "+tops" : "", r.mode, r.mask, r.cycleLength, r.writeLength, r.tops, r.rowBefore[0],
+                     r.rowBefore[1], r.rowBefore[2], r.rowBefore[3], r.rowAfter[0], r.rowAfter[1], r.rowAfter[2], r.rowAfter[3], r.words);
+        for (u32 i = 0; i < std::min(r.words, 8u); i++)
+        {
+            std::fprintf(file, " %08x", r.data[i]);
+        }
+
+        std::fprintf(file, "\n");
+    }
+
+    std::fclose(file);
+}
+
 void Vif::Execute(u32 code, const u32* data)
+{
+    VifRecord* record = nullptr;
+    if (index_ == 1 && HistoryOn())
+    {
+        record = &g_History[g_HistorySerial % HistorySize];
+        record->serial = g_HistorySerial++;
+        record->code = code;
+        record->mode = mode;
+        record->mask = mask;
+        record->cycleLength = cycleLength;
+        record->writeLength = writeLength;
+        record->tops = tops;
+        std::memcpy(record->rowBefore, row, 16);
+        record->words = DataWords(code);
+        for (u32 i = 0; i < std::min(record->words, 8u); i++)
+        {
+            record->data[i] = data[i];
+        }
+    }
+
+    ExecuteNow(code, data);
+    if (record != nullptr)
+    {
+        std::memcpy(record->rowAfter, row, 16);
+    }
+}
+
+void Vif::ExecuteNow(u32 code, const u32* data)
 {
     u32 command = (code >> 24) & 0x7F;
     u32 imm = code & 0xFFFF;

@@ -12,7 +12,12 @@
 // game builds frame N + 1 while the render thread draws frame N, and the window shows N - 1 then: one frame later than the game
 // made it, as on the PS2, whose DMA sent a frame's chain while the game built the next.
 //
-// $TWIN_RENDER_THREAD=0 keeps everything on the game's thread (as before the render thread). See native/GRAPHICS.md, "Threads".
+// Three stages by default: VIF1 and VU1 run on a thread of their own between the game's and the render thread (the VU stage, a
+// queue like the render thread's: the game's thread queues VIF1's words, the GIF's transfers and the work for the GS's side, in
+// their order; the VU stage runs VIF1 and VU1 and hands everything on, what VU1 and VIF1 send the GIF in its place, to the render
+// thread's queue). The GS gets exactly what it got before, in the same order. $TWIN_RENDER_THREAD=gs keeps VIF1 and VU1 on the
+// game's thread (two stages), =vif puts them on the render thread, =0 keeps everything on the game's thread (as before the
+// render thread). See native/GRAPHICS.md, "Threads".
 
 #include "common.h"
 

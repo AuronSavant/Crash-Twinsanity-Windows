@@ -194,7 +194,8 @@ bool Active()
         if (folder != nullptr && folder[0] != '\0')
         {
             g_Folder = folder;
-            std::filesystem::create_directories(g_Folder);
+            std::error_code ignored;
+            std::filesystem::create_directories(g_Folder, ignored);
             Native::Log("ui shots: the menus driven to %s", folder);
         }
     }

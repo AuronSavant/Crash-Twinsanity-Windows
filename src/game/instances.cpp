@@ -1,5 +1,11 @@
 #include "game/instances.h"
 
+#ifdef TWIN_NATIVE
+#include "native.h"
+
+#include <unordered_set>
+#endif
+
 #include "game/chunkdata.h"
 #include "game/clock.h"
 #include "game/chunkloading.h"
@@ -349,8 +355,43 @@ u32 ReferenceArrayAppend(ReferenceArray* array, Reference** handle)
     return last;
 }
 
+#ifdef TWIN_NATIVE
+namespace
+{
+// The instances made and not destroyed (the game's thread's)
+std::unordered_set<const InstanceContext*>& LiveInstances()
+{
+    static std::unordered_set<const InstanceContext*> live;
+    return live;
+}
+}
+
+bool InstanceLive(const InstanceContext* instance)
+{
+    return LiveInstances().count(instance) != 0;
+}
+
+void ForgetFreedInstance(InstanceContext** instance)
+{
+    if (*instance != nullptr && !InstanceLive(*instance))
+    {
+        // (Said the first few times: the retail code would have read the freed memory)
+        static u32 told = 0;
+        if (told++ < 8)
+        {
+            Native::Log("instances: a reference to an instance that's gone let go of");
+        }
+
+        *instance = nullptr;
+    }
+}
+#endif
+
 InstanceContext* InstanceContext::Construct(InstanceContext* instance)
 {
+#ifdef TWIN_NATIVE
+    LiveInstances().insert(instance);
+#endif
     ReferencedObject::Construct(instance);
     instance->reference = nullptr;
     instance->parent = nullptr;
@@ -373,6 +414,9 @@ InstanceContext* InstanceContext::Construct(InstanceContext* instance)
 
 void InstanceContext::Destroy(u32 destroyFlags)
 {
+#ifdef TWIN_NATIVE
+    LiveInstances().erase(this);
+#endif
     vtable = g_InstanceContextVTable;
     InstancePlaces* block = places;
     if (block != nullptr)

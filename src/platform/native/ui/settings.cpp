@@ -177,6 +177,9 @@ void Build()
             SetOption(OptionVibration, value);
         },
         1, [](s32 value) { return Text(value != 0 ? 1 : 0); }));
+    gameplay.push_back(OptionChoice(TextGameLanguage, TextDescGameLanguage, OptionLanguage,
+                                    {TextLanguageWindows, TextLanguageEnglish, TextLanguageFrench, TextLanguageGerman,
+                                     TextLanguageItalian, TextLanguageSpanish}));
     gameplay.push_back(Toggle(TextSkipCutscenes, TextDescSkip, OptionSkipCutscenes));
     gameplay.push_back(Toggle(TextFastLoading, TextDescFastLoading, OptionFastLoading));
     gameplay.push_back(Toggle(TextBugFixes, TextDescBugFixes, OptionRetailFixes));
@@ -223,7 +226,8 @@ void Build()
             SetOption(OptionUltrawide, value == 2 ? 1 : 0);
         },
         2, [](s32 value) { return std::string(value == 0 ? "4:3" : value == 1 ? "16:9" : "21:9"); }));
-    display.push_back(OptionChoice(TextRefreshRate, TextDescRefreshRate, OptionRefresh60, {Text50Hz, Text60Hz}));
+    display.push_back(OptionChoice(TextRefreshRate, TextDescRefreshRate, OptionRefresh60,
+                                   {Text50Hz, Text60Hz, Text120Hz, Text144Hz, TextUnlimited}));
     display.push_back(OptionChoice(TextFiltering, TextDescFiltering, OptionTextureFilter, {TextSharp, TextSmooth}));
     display.push_back(Toggle(TextCrt, TextDescCrt, OptionCrtFilter));
     display.push_back(Toggle(TextTexturePack, TextDescTexturePack, OptionTexturePack));

@@ -25,6 +25,9 @@ TARBALL=$SOURCES/ffmpeg-$VERSION.tar.xz
 case $(uname -s) in
     Darwin) OS=macos ;;
     Linux) OS=linux ;;
+    # Windows: Git Bash (or MSYS2) with LLVM-MinGW's clang on the PATH and an MSYS make (native/tools/build_windows.py fetches
+    # one); configure's own temporary files want a POSIX folder
+    MINGW*|MSYS*) OS=windows; export TMPDIR=/tmp ;;
     *) echo "build_ffmpeg.sh: $(uname -s) isn't supported" >&2; exit 1 ;;
 esac
 HOST_ARCH=$(uname -m)
@@ -74,11 +77,17 @@ set -- \
     --disable-programs --disable-doc --disable-network --disable-autodetect \
     --disable-avdevice --disable-avformat --disable-avfilter --disable-swresample --disable-swscale \
     --enable-decoder=mpeg2video --enable-parser=mpegvideo \
-    --enable-shared --disable-static --enable-pic \
-    --enable-pthreads
-CC=${CC:-clang}
-command -v "$CC" > /dev/null || CC=cc
-set -- "$@" --cc="$CC"
+    --enable-shared --disable-static
+if [ "$OS" = windows ]; then
+    # MinGW's DLLs (avcodec-63.dll and avutil-61.dll with their import libraries), Windows' own threads
+    set -- "$@" --target-os=mingw32 --arch=x86_64 --enable-w32threads --cc=x86_64-w64-mingw32-clang --ar=llvm-ar \
+        --nm=llvm-nm --ranlib=llvm-ranlib
+else
+    set -- "$@" --enable-pic --enable-pthreads
+    CC=${CC:-clang}
+    command -v "$CC" > /dev/null || CC=cc
+    set -- "$@" --cc="$CC"
+fi
 if [ "$OS" = macos ]; then
     # The same macOS the app runs on, whichever Mac builds it
     TARGET=${MACOSX_DEPLOYMENT_TARGET:-11.0}

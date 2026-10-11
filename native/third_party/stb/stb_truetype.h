@@ -4208,6 +4208,9 @@ STBTT_DEF void stbtt_MakeGlyphBitmapSubpixelPrefilter(const stbtt_fontinfo *info
 STBTT_DEF int stbtt_PackFontRangesRenderIntoRects(stbtt_pack_context *spc, const stbtt_fontinfo *info, stbtt_pack_range *ranges, int num_ranges, stbrp_rect *rects)
 {
    int i,j,k, missing_glyph = -1, return_value = 1;
+   // (Twinsanity's native build) The missing glyph's data, not its index: the index is into its own range's chardata, and
+   // a later range's may be shorter (an index past its end, read and written: a crash now and then)
+   stbtt_packedchar missing_char = {0};
 
    // save current values
    int old_h_over = spc->h_oversample;
@@ -4273,12 +4276,14 @@ STBTT_DEF int stbtt_PackFontRangesRenderIntoRects(stbtt_pack_context *spc, const
             bc->xoff2    =                (x0 + r->w) * recip_h + sub_x;
             bc->yoff2    =                (y0 + r->h) * recip_v + sub_y;
 
-            if (glyph == 0)
+            if (glyph == 0) {
                missing_glyph = j;
+               missing_char = *bc;
+            }
          } else if (spc->skip_missing) {
             return_value = 0;
          } else if (r->was_packed && r->w == 0 && r->h == 0 && missing_glyph >= 0) {
-            ranges[i].chardata_for_range[j] = ranges[i].chardata_for_range[missing_glyph];
+            ranges[i].chardata_for_range[j] = missing_char;
          } else {
             return_value = 0; // if any fail, report failure
          }

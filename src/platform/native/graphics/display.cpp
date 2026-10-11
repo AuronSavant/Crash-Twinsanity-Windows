@@ -139,6 +139,8 @@ bool g_Pal = true;
 bool g_Paced = true;
 std::chrono::steady_clock::time_point g_NextBlank;
 bool g_BlankStarted = false;
+// The frame rate option's (0: the video mode's, -1: as fast as they come)
+s32 g_FrameRate = 0;
 
 template <typename T>
 void Load(T& function, const char* name)
@@ -805,17 +807,40 @@ void SetPacing(bool paced)
     g_Paced = paced;
 }
 
+void SetFrameRate(s32 rate)
+{
+    g_FrameRate = rate == 0 ? -1 : rate > 60 ? rate : 0;
+}
+
 // The next vertical blank: a field's time after the last one (50 Hz PAL, 60000/1001 Hz NTSC); late frames start counting again
+// The game thread's work between its waits for the vertical blank (TWIN_FRAME_STATS' "game")
+std::atomic<u64> g_GameWorkNanoseconds{0};
+std::chrono::steady_clock::time_point g_GameWorkFrom;
+
 void WaitForVBlank()
 {
-    if (!g_Paced)
+    const auto arrived = std::chrono::steady_clock::now();
+    if (g_GameWorkFrom.time_since_epoch().count() != 0)
+    {
+        g_GameWorkNanoseconds += static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(arrived - g_GameWorkFrom).count());
+    }
+
+    struct Restart
+    {
+        ~Restart()
+        {
+            g_GameWorkFrom = std::chrono::steady_clock::now();
+        }
+    } restart;
+    if (!g_Paced || g_FrameRate < 0)
     {
         return;
     }
 
     using namespace std::chrono;
-    auto field = g_Pal ? duration_cast<steady_clock::duration>(microseconds(20000))
-                       : duration_cast<steady_clock::duration>(nanoseconds(16683333));
+    auto field = g_FrameRate > 0 ? duration_cast<steady_clock::duration>(nanoseconds(1000000000ll / g_FrameRate))
+                 : g_Pal         ? duration_cast<steady_clock::duration>(microseconds(20000))
+                                 : duration_cast<steady_clock::duration>(nanoseconds(16683333));
     auto now = steady_clock::now();
     if (!g_BlankStarted || now > g_NextBlank + field)
     {
@@ -824,7 +849,17 @@ void WaitForVBlank()
         return;
     }
 
+#if defined(_WIN32)
+    // Windows' sleeps are as coarse as its timer (up to 15.6 ms late, a 50 Hz field could take 31): SDL's precise delay, a high
+    // resolution waitable timer and a short spin
+    auto left = duration_cast<nanoseconds>(g_NextBlank - steady_clock::now()).count();
+    if (left > 0)
+    {
+        SDL_DelayPrecise(static_cast<Uint64>(left));
+    }
+#else
     std::this_thread::sleep_until(g_NextBlank);
+#endif
     g_NextBlank += field;
 }
 
@@ -977,13 +1012,24 @@ void ThreadedFrameStats(const Shown* shown)
     u64 translatedNow = vu1Here ? Ee::GetVu1TranslationStats().translatedInstructions : translated;
     u64 busyNow = RenderBusyNanoseconds();
     u64 waitedNow = RenderWaitNanoseconds();
+    // The GPU renderer's work for the frame: its batches, the textures it decoded, memory's pages sent to it and read back,
+    // its copies of a target
+    static HardwareStats hw = {};
+    const HardwareStats hwNow = GetHardwareStats();
+    static u64 game = 0;
+    const u64 gameNow = g_GameWorkNanoseconds.load();
     std::fprintf(stderr,
                  "frame: %.1f ms, vu1 %llu (%.1f ms, %.0f%% translated), vu0 %llu, primitives %llu, box pixels %llu, render %.1f ms, "
-                 "waited %.1f ms\n",
+                 "waited %.1f ms; gpu batches %llu, decodes %llu, uploads %llu, downloads %llu, copies %llu; game %.1f ms\n",
                  std::chrono::duration<double, std::milli>(now - last).count(), (unsigned long long)executed, (ns - vu1Ns) / 1e6,
                  executed != 0 ? 100.0 * (translatedNow - translated) / executed : 0.0, (unsigned long long)(h.vu0->executed - vu0),
                  (unsigned long long)(shown->primitives - prims), (unsigned long long)(shown->boxPixels - pixels),
-                 (busyNow - busy) / 1e6, (waitedNow - waited) / 1e6);
+                 (busyNow - busy) / 1e6, (waitedNow - waited) / 1e6, (unsigned long long)(hwNow.batches - hw.batches),
+                 (unsigned long long)(hwNow.decodes - hw.decodes), (unsigned long long)(hwNow.uploads - hw.uploads),
+                 (unsigned long long)(hwNow.downloads - hw.downloads), (unsigned long long)(hwNow.copies - hw.copies),
+                 (gameNow - game) / 1e6);
+    hw = hwNow;
+    game = gameNow;
     if (vu1Here)
     {
         h.vu1->timing = true;

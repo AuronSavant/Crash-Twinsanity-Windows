@@ -62,6 +62,9 @@ bool Asleep(const InstanceContext* instance)
 // The agent references, forgotten once their instances are asleep (the second kept while the node's flag says so)
 InstanceContext* AwakeAgentRef1(ObjectNode* node)
 {
+#ifdef TWIN_NATIVE
+    ForgetFreedInstance(&node->agentRef1);
+#endif
     if (node->agentRef1 != nullptr && Asleep(node->agentRef1))
     {
         node->agentRef1 = nullptr;
@@ -72,6 +75,9 @@ InstanceContext* AwakeAgentRef1(ObjectNode* node)
 
 InstanceContext* AwakeAgentRef2(ObjectNode* node)
 {
+#ifdef TWIN_NATIVE
+    ForgetFreedInstance(&node->agentRef2);
+#endif
     if (node->agentRef2 != nullptr && Asleep(node->agentRef2) && !node->flags.keepsAgentRef2)
     {
         node->agentRef2 = nullptr;

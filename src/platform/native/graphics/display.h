@@ -14,6 +14,8 @@ void SetVideoMode(bool pal);
 // Waits for the next vertical blank (pacing can be turned off, for the tests that run frames as fast as they can)
 void WaitForVBlank();
 void SetPacing(bool paced);
+// The frames' rate past the video mode's (120, 144; 0 as fast as they come; 50 or 60: the video mode's own blanks)
+void SetFrameRate(s32 rate);
 // The PCRTC's picture read out of the GS and shown
 void ShowFrame();
 // The renderer and internal resolution settings (settings.h, resolution.h) put into effect: at the start and after each picture

@@ -460,17 +460,12 @@ struct Context
 constexpr u32 LocalMemoryBytes = 4 * 1024 * 1024;
 constexpr u32 BlockCount = LocalMemoryBytes / 256;
 
-// The local memory's layouts: where a pixel of a format at (x, y) of a buffer (its base in blocks of 64 words, its width in 64
-// pixels) is, in units of the format's size (words for 32 and 24 bit, half words for 16 bit, bytes for 8 bit, nibbles for 4
-// bit; the H formats and the Z formats as their colour twins)
-u32 PixelAddress32(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress16(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress16S(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress8(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress4(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress32Z(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress16Z(u32 x, u32 y, u32 bp, u32 bw);
-u32 PixelAddress16SZ(u32 x, u32 y, u32 bp, u32 bw);
+}
+
+#include "gsaddress.h"
+
+namespace Gs
+{
 
 // The 8 KB page of local memory a pixel of a format is in
 u32 PixelPage(u32 psm, u32 x, u32 y, u32 bp, u32 bw);
@@ -559,6 +554,8 @@ public:
     u32 PageWritten(u32 page) const { return pageWritten_[page & (LocalMemoryBytes / 8192 - 1)]; }
     u32 generation() const { return generation_; }
     void NextGeneration() { generation_++; }
+    // Changes with every register write but the vertexes' and the transfers' (the draw state's: Gs::DrawPrimitive's cache)
+    u64 stateGeneration() const { return stateGeneration_; }
     // The CLUT buffer's contents (they change at each load)
     u32 clutVersion() const { return clutVersion_; }
     const u16* clut() const { return clut_; }
@@ -651,6 +648,9 @@ private:
     RegPrim prim_ = {};
     RegPrim prmode_ = {};
     u32 prmodecont_ = 1;
+    // Changed whenever a register a primitive's DrawState is made from is written (or the state restored): DrawPrimitive makes
+    // the state again only then (gsdraw.cpp)
+    u64 stateGeneration_ = 1;
     RegRgbaq rgbaq_ = {};
     f32 s_ = 0.0f;
     f32 t_ = 0.0f;

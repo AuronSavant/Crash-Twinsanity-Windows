@@ -11,7 +11,9 @@ object whose layout can't be worked out exactly is reported, and the build stops
 
     native/tools/convert_data.py [--report]
 """
-import argparse, collections, json, os, re, struct, subprocess, sys
+import argparse, collections, functools, json, os, re, struct, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import host  # noqa: E402
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[2]
@@ -104,13 +106,14 @@ def read_split():
     return objects, order
 
 # ---------------------------------------------------------------------------------------------------------------- layouts
+@functools.lru_cache(None)
 def toolchain_includes():
-    gxx = os.path.expanduser("~/ps2dev/ee/bin/mips64r5900el-ps2-elf-g++")
+    gxx = host.ee_gxx()
     r = subprocess.run([gxx, "-E", "-v", "-x", "c++", os.devnull], capture_output=True, text=True)
     lines = r.stderr.splitlines()
     s, e = lines.index("#include <...> search starts here:") + 1, lines.index("End of search list.")
-    dirs = [os.path.normpath(l.strip()) for l in lines[s:e]]
-    return [a for d in dirs if not d.endswith(("15.2.0/include", "include-fixed")) for a in ("-isystem", d)]
+    dirs = [os.path.normpath(l.strip()).replace("\\", "/") for l in lines[s:e]]
+    return tuple(a for d in dirs if not d.endswith(("15.2.0/include", "include-fixed")) for a in ("-isystem", d))
 
 def probe_source():
     """Every header, and the .cpp files' own types too: the probe includes each .cpp's types by compiling the .cpp files"""
@@ -127,17 +130,16 @@ def dump_layouts(target):
     sources = [probe] + sorted(p for p in (HERE / "src").rglob("*.cpp")
                                if (p.relative_to(HERE / "src").parts[0] != "platform"
                                    or p.relative_to(HERE / "src").parts[1] == "native") and p.name != "abi.cpp") + reused
-    newest = max(p.stat().st_mtime for p in list((HERE / "include").rglob("*.h")) + sources[1:])
-    if cache.exists() and cache.stat().st_mtime > newest:
-        return json.loads(cache.read_text())
-    probe.write_text(probe_source())
+    probe_text = probe_source()
+    if not probe.exists() or probe.read_text() != probe_text:
+        probe.write_text(probe_text)
     if target == "native":
-        base = ["clang++", "-std=gnu++2c", "-fsyntax-only", "-DTWIN_NATIVE", "-Inative/include", "-Iinclude",
-                "-Isrc/platform/native", "-I/opt/homebrew/include"]
+        base = [host.CLANG, "-std=gnu++2c", "-fsyntax-only", "-DTWIN_NATIVE", "-Inative/include", "-Iinclude",
+                "-Isrc/platform/native"] + host.host_includes() + host.native_flags()
     else:
-        base = (["clang++", "--target=mips64el-unknown-elf", "-mabi=n32", "-std=gnu++2c", "-fsyntax-only", "-nostdinc++"]
-                + toolchain_includes() + ["-D_EE", "-Iinclude", "-I" + os.path.expanduser("~/ps2dev/ps2sdk/ee/include"),
-                                          "-I" + os.path.expanduser("~/ps2dev/ps2sdk/common/include")])
+        base = ([host.CLANG, "--target=mips64el-unknown-elf", "-mabi=n32", "-std=gnu++2c", "-fsyntax-only", "-nostdinc++"]
+                + list(toolchain_includes()) + ["-D_EE", "-Iinclude", "-I" + host.ps2sdk() + "/ee/include",
+                                          "-I" + host.ps2sdk() + "/common/include"])
     base += ["-fno-exceptions", "-fno-rtti", "-Wno-everything", "-Xclang", "-fdump-record-layouts-complete"]
     layouts = {}
     from concurrent.futures import ThreadPoolExecutor
@@ -146,14 +148,31 @@ def dump_layouts(target):
         if target == "ps2" and "platform/native" in str(source):
             # The native platform's own types laid out as the PS2 had them: built for the PS2's target (its C++ library's
             # headers) with the native build's headers in place of PS2SDK's (uiptr is the target's pointer size, 32 bits)
-            args = (["clang++", "--target=mips64el-unknown-elf", "-mabi=n32", "-std=gnu++2c", "-fsyntax-only", "-nostdinc++"]
-                    + toolchain_includes() + ["-DTWIN_NATIVE", "-Inative/include", "-Iinclude", "-Isrc/platform/native",
-                                              "-I/opt/homebrew/include", "-fno-exceptions", "-fno-rtti", "-Wno-everything",
+            args = ([host.CLANG, "--target=mips64el-unknown-elf", "-mabi=n32", "-std=gnu++2c", "-fsyntax-only", "-nostdinc++"]
+                    + list(toolchain_includes()) + ["-DTWIN_NATIVE", "-Inative/include", "-Iinclude", "-Isrc/platform/native"]
+                    + host.host_includes() + ["-fno-exceptions", "-fno-rtti", "-Wno-everything",
                                               "-Xclang", "-fdump-record-layouts-complete"])
         return subprocess.run(args + [str(source)], capture_output=True, text=True, cwd=HERE).stdout
+
+    # Each file's layouts kept between runs (native/tools/host.py's FileCache): only the files that changed are laid out again
+    files = host.FileCache(f"layouts_{target}_cache", " ".join(base) + " " + " ".join(toolchain_includes() if target == "ps2"
+                                                                                       else []))
+
+    def run_cached(source):
+        found = files.get(source)
+        if found is None:
+            found = {}
+            parse_layouts(run(source), found)
+            files.put(source, found)
+        return found
+
     with ThreadPoolExecutor(10) as pool:
-        for text in pool.map(run, sources):
-            parse_layouts(text, layouts)
+        for found in pool.map(run_cached, sources):
+            # The first file to lay a record out gives it, as the dumps were read in this order
+            for name, layout in found.items():
+                if name not in layouts:
+                    layouts[name] = layout
+    files.save()
     cache.write_text(json.dumps(layouts))
     return layouts
 
@@ -197,6 +216,9 @@ SCALARS = {  # name: (ps2 size, native size, kind)
     **{n: (4, 8, "uptr") for n in ("uiptr", "uintptr_t", "std::uintptr_t", "size_t", "std::size_t", "unsigned long")},
     **{n: (4, 8, "sptr") for n in ("siptr", "intptr_t", "std::intptr_t", "ptrdiff_t", "long")},
 }
+if host.WINDOWS:
+    # Windows' long is 32 bits (LLP64): pointer-sized integers are long long there, and long is n32's own size
+    SCALARS.update({n: (4, 4, "int") for n in ("long", "unsigned long", "long int", "unsigned long int")})
 
 def enum_bases():
     """Enums with an underlying type of their own (enum X : u8): their size"""
@@ -526,7 +548,10 @@ def main():
     wanted = collections.OrderedDict()
     for label, info in types_info.items():
         if info["kind"] == "var" and not info.get("defined") and label in objects:
-            wanted[label] = info["canonical"]
+            # The type as written when it's a scalar the table knows (uiptr): its canonical type is the host's (Windows'
+            # uintptr_t is unsigned long long, 8 bytes on the PS2 too by that name), not the PS2's
+            written = Types.clean(info["type"])
+            wanted[label] = written if written in SCALARS else info["canonical"]
     missing_from_split = sorted(l for l, i in types_info.items()
                                 if i["kind"] == "var" and not i.get("defined") and l not in objects)
 
@@ -610,11 +635,62 @@ def main():
 
     for w in warnings:
         print("WARNING", w, file=sys.stderr)
+    mark_narrow_returns(results, types_info, types, problems)
     write_cpp(results, objects, alias_offsets)
     if problems:
         for p in problems:
             print("PROBLEM", p, file=sys.stderr)
         sys.exit(f"{len(problems)} problems (see above)")
+
+# gcc2.h's GccNarrowReturn: what a function returning a narrow integer is marked with in its vtable entries' index
+NARROW_RETURNS = {
+    **{n: 0x1000 for n in ("bool", "u8", "unsigned char", "uint8_t", "char8_t")},
+    **{n: 0x2000 for n in ("s8", "signed char", "int8_t", "char")},
+    **{n: 0x3000 for n in ("u16", "unsigned short", "uint16_t", "char16_t")},
+    **{n: 0x4000 for n in ("s16", "short", "int16_t")},
+}
+# A GccVTableEntry natively: delta (s16), index (s16), then the function at 8; 16 bytes
+VTABLE_ENTRY_BYTES, VTABLE_INDEX_OFFSET, VTABLE_FUNCTION_OFFSET = 16, 2, 8
+
+def narrow_return(info, types):
+    """The GccNarrowReturn mark of a function's return type (0: as wide as a register's 32 bits, or not an integer)"""
+    m = re.match(r"^(.*?)\s*\(", info["type"])
+    if not m:
+        return 0
+    returned = Types.clean(m.group(1))
+    for _ in range(8):
+        if returned in NARROW_RETURNS:
+            return NARROW_RETURNS[returned]
+        if returned in types.enums:
+            # An enum with a narrow base, taken as unsigned
+            return {1: 0x1000, 2: 0x3000}.get(types.enums[returned], 0)
+        alias = types.aliases.get(returned)
+        if alias is None or alias == returned:
+            return 0
+        returned = Types.clean(alias)
+    return 0
+
+def mark_narrow_returns(results, types_info, types, problems):
+    """Marks the retail vtables' entries whose C++ function returns a narrow integer (gcc2.h's CallNarrowed): x86-64 leaves
+    the register's bits above it as they were, where the PS2 and Apple's arm64 extend it, and the calls through the vtables
+    read 32 bits (CallVirtual<u32> of a bool function)"""
+    marked = 0
+    for label, (t, out, align, fixups) in results.items():
+        for offset, symbol, addend in fixups:
+            info = types_info.get(symbol)
+            if info is None or info["kind"] != "function" or addend != 0:
+                continue
+            mark = narrow_return(info, types)
+            if mark == 0:
+                continue
+            if "GccVTableEntry" not in str(t) or offset % VTABLE_ENTRY_BYTES != VTABLE_FUNCTION_OFFSET:
+                problems.append(f"{label} +{offset:#x}: {symbol} returns a narrow integer from outside a vtable entry")
+                continue
+            at = offset - VTABLE_FUNCTION_OFFSET + VTABLE_INDEX_OFFSET
+            index = struct.unpack_from("<H", out, at)[0]
+            struct.pack_into("<H", out, at, index | mark)
+            marked += 1
+    print(f"{marked} vtable entries of functions returning narrow integers marked", file=sys.stderr)
 
 def write_cpp(results, objects, aliases):
     lines = ["// Generated by native/tools/convert_data.py from the split's data: don't edit",
@@ -628,6 +704,11 @@ def write_cpp(results, objects, aliases):
             lines.append(f'extern char x_{cxx_escape(s)} asm(SYMBOL("{s}"));')
     for label, (t, out, align, fixups) in results.items():
         body = ",".join(str(b) for b in out) if any(out) else ""
+        # x86-64's ABI gives a global array of 16 bytes or more 16 byte alignment, and clang counts on it wherever the C++
+        # declares one (aligned SSE loads and stores, movaps): an alignas of less would lower it here, so objects that big are
+        # 16 byte aligned (only more than they need elsewhere)
+        if len(out) >= 16:
+            align = max(align, 16)
         lines.append(f'// {t}\nalignas({align}) unsigned char x_{cxx_escape(label)}[{max(len(out), 1)}] asm(SYMBOL("{label}")) = {{{body}}};')
     lines.append("}\n")
     # Labels inside another object (the PS2's neighbouring globals a C++ struct covers): symbols at their native offsets in it

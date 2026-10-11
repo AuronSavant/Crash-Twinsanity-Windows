@@ -6,7 +6,7 @@ build/native/icon/ from the user's own copy.
 
     native/tools/make_icon.py <crash head texture png> [--background blue|green] [--out build/native/icon]
 
-Writes icon_1024.png, the Linux sizes (icon_<n>.png) and on macOS AppIcon.icns (iconutil).
+Writes icon_1024.png, the Linux sizes (icon_<n>.png), Windows' AppIcon.ico and on macOS AppIcon.icns (iconutil).
 """
 import argparse, math, os, shutil, subprocess, sys
 from pathlib import Path
@@ -57,11 +57,31 @@ def background(size, colours):
             pixels[x, y] = tuple(round(c * (1 - t) + e * t) for c, e in zip(centre, edge))
     return gradient
 
-def make(texture_path, colour, out):
+def key_background(image):
+    """A texture without alpha (drawn opaque over a plain background): the background's colour made transparent from the
+    edges in, as far as it reaches (a flood fill, so the same colour inside the drawing stays), its edge softened"""
+    marked = image.convert("RGB")
+    marker = (255, 0, 255)
+    width, height = marked.size
+    for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)):
+        if marked.getpixel((x, y)) != marker:
+            ImageDraw.floodfill(marked, (x, y), marker, thresh=40)
+    mask = Image.eval(ImageChops.difference(marked, Image.new("RGB", marked.size, marker)).convert("L"),
+                      lambda v: 0 if v == 0 else 255)
+    keyed = image.copy()
+    keyed.putalpha(mask.filter(ImageFilter.GaussianBlur(0.5)))
+    return keyed
+
+def make(texture_path, colour, out, flip=False):
     size = 1024
     # Apple's grid: the shape is 824 of 1024, corners 185
     inset, radius = 100, 185
     head = full_intensity(Image.open(texture_path))
+    if flip:
+        # A texture as the GS holds it (the native build's dumps, TWIN_HW_DUMP_TEXTURES): upside down
+        head = head.transpose(Image.FLIP_TOP_BOTTOM)
+    if head.getchannel("A").getextrema() == (255, 255):
+        head = key_background(head)
     head = head.crop(head.getchannel("A").getbbox())
     target = 700
     head = upscale(head, target)
@@ -87,6 +107,8 @@ def make(texture_path, colour, out):
     icon.save(out / "icon_1024.png")
     for n in (512, 256, 128, 64, 48, 32, 16):
         icon.resize((n, n), Image.LANCZOS).save(out / f"icon_{n}.png")
+    # Windows' icon (native/CMakeLists.txt puts it in the program's resources): every size Explorer asks for, in one file
+    icon.save(out / "AppIcon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     if sys.platform == "darwin" and shutil.which("iconutil"):
         iconset = out / "AppIcon.iconset"
         iconset.mkdir(exist_ok=True)
@@ -102,5 +124,6 @@ if __name__ == "__main__":
     parser.add_argument("texture")
     parser.add_argument("--background", choices=BACKGROUNDS, default="blue")
     parser.add_argument("--out", default="build/native/icon")
+    parser.add_argument("--flip", action="store_true", help="the texture is upside down (a dump of the GS's)")
     args = parser.parse_args()
-    print(make(args.texture, args.background, Path(args.out)))
+    print(make(args.texture, args.background, Path(args.out), args.flip))

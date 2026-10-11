@@ -1287,6 +1287,9 @@ u32 CharacterAgent::CanChangeChunk(ChunkData* from, ChunkLinkData* chunkLink)
     {
         // An asleep AgentRef2 is let go of unless the node keeps it; the object he carries goes through with him
         auto* node = static_cast<ObjectNode*>(GetGameNode(&instance->nodes, NodeObject));
+#ifdef TWIN_NATIVE
+        ForgetFreedInstance(&node->agentRef2);
+#endif
         InstanceContext* carried = node->agentRef2;
         if (carried != nullptr && carried->flags.asleep &&
             !node->flags.keepsAgentRef2)

@@ -153,6 +153,9 @@ Vector4 Cross(const Vector4& a, const Vector4& b, f32 w)
 // The object node's AgentRef2 (an asleep one forgotten unless the node keeps it)
 InstanceContext* AwakeAgentRef2(ObjectNode* node)
 {
+#ifdef TWIN_NATIVE
+    ForgetFreedInstance(&node->agentRef2);
+#endif
     InstanceContext* other = node->agentRef2;
     if (other != nullptr && other->flags.asleep && !node->flags.keepsAgentRef2)
     {

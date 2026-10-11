@@ -57,6 +57,8 @@ struct Archive
 {
     Native::Disc::Entry data{};
     std::map<std::string, std::pair<u32, u32>> files;
+    // The paths as the table has them, by their upper case
+    std::map<std::string, std::string> names;
 };
 
 bool OpenArchive(Archive* archive)
@@ -83,6 +85,7 @@ bool OpenArchive(Archive* archive)
         std::string name(reinterpret_cast<const char*>(&bytes[at + 4]), length);
         name.resize(std::strlen(name.c_str()));
         archive->files[Upper(name)] = {Le32(&bytes[at + 4 + length]), Le32(&bytes[at + 8 + length])};
+        archive->names[Upper(name)] = name;
         at += 4 + length + 8;
     }
 
@@ -391,6 +394,8 @@ void TestTexts()
     Check(std::strcmp(kept[0x27], "something else") == 0, "a line that isn't the disc's was replaced");
     Native::Log("ui self-test: %u PC lines checked against the disc, every language's lines free of console wording",
                 replaced);
+    // The lines kept point into this test's files, which go now (the prompts' relabelling would read them)
+    ForgetTextLines();
 }
 
 // ------------------------------------------------------------------------------------------------------------- the save flow
@@ -612,11 +617,15 @@ void TestResolution()
     // Kept in the settings folder (a test one) and read back
     g_ResolutionToGraphics = false;
     std::string folder = (std::filesystem::temp_directory_path() / "twinsanity-ui-selftest").string();
-    std::filesystem::remove_all(folder);
+    std::error_code ignored;
+    std::filesystem::remove_all(folder, ignored);
     std::string home = std::getenv("HOME") != nullptr ? std::getenv("HOME") : "";
     std::string xdg = std::getenv("XDG_CONFIG_HOME") != nullptr ? std::getenv("XDG_CONFIG_HOME") : "";
-    setenv("HOME", folder.c_str(), 1);
-    setenv("XDG_CONFIG_HOME", folder.c_str(), 1);
+    std::string appData = std::getenv("APPDATA") != nullptr ? std::getenv("APPDATA") : "";
+    Native::SetEnvironment("HOME", folder.c_str());
+    Native::SetEnvironment("XDG_CONFIG_HOME", folder.c_str());
+    // Windows' settings folder
+    Native::SetEnvironment("APPDATA", folder.c_str());
     Resolution chosen = FromChoices(1, DisplayChoices - 1);
     Check(chosen.scale == 2 && chosen.fullscreen, "2x fullscreen from the choices");
     SetResolution(chosen);
@@ -631,17 +640,13 @@ void TestResolution()
           "4x window 1920x1080 in use");
     ApplySavedResolution();
     Check(CurrentResolution().scale == 4 && CurrentResolution().windowWidth == 1920, "4x window 1920x1080 read back");
-    setenv("HOME", home.c_str(), 1);
-    if (xdg.empty())
-    {
-        unsetenv("XDG_CONFIG_HOME");
-    }
-    else
-    {
-        setenv("XDG_CONFIG_HOME", xdg.c_str(), 1);
-    }
+    Native::SetEnvironment("HOME", home.c_str());
+    Native::SetEnvironment("XDG_CONFIG_HOME", xdg.empty() ? nullptr : xdg.c_str());
+    Native::SetEnvironment("APPDATA", appData.empty() ? nullptr : appData.c_str());
 
-    std::filesystem::remove_all(folder);
+    // Windows can't remove a file that's open
+    file.close();
+    std::filesystem::remove_all(folder, ignored);
     Native::Log("ui self-test: the resolution's choices, applying and keeping checked");
 }
 }
@@ -670,6 +675,29 @@ void TestControls()
     ReadBindings(keys, nullptr, &pad);
     Check(pad.leftX == 128 && pad.leftY == 0, "W: all the way up (%u, %u)", pad.leftX, pad.leftY);
     keys[SDL_SCANCODE_W] = false;
+
+    // A gamepad's stick: a circle's diagonal (an Xbox Series pad's, 0.71 of each axis) reaches the square's corner as the
+    // DualShock 2's, half way a half push each, the axes' own bytes as they were
+    u8 stickX = 218;
+    u8 stickY = 38;
+    Squared(&stickX, &stickY);
+    Check(stickX >= 254 && stickY <= 1, "a stick's full diagonal to the square's corner (%u, %u)", stickX, stickY);
+    stickX = 173;
+    stickY = 83;
+    Squared(&stickX, &stickY);
+    Check(stickX == 192 && stickY == 64, "a stick's half diagonal (%u, %u)", stickX, stickY);
+    bool axesKept = true;
+    for (u32 value = 0; value < 256; value++)
+    {
+        u8 alongX = static_cast<u8>(value);
+        u8 centreY = 128;
+        u8 centreX = 128;
+        u8 alongY = static_cast<u8>(value);
+        Squared(&alongX, &centreY);
+        Squared(&centreX, &alongY);
+        axesKept = axesKept && alongX == value && centreY == 128 && centreX == 128 && alongY == value;
+    }
+    Check(axesKept, "a stick pushed along an axis kept as it was");
 
     // The mouse's keys' names (the native texts' English: the game's texts aren't loaded here) all there and all different
     std::set<std::string> names;
@@ -711,9 +739,11 @@ void TestControls()
     SetOption(OptionInvertMouseY, 0);
     MouseLookForceForTest(false);
 
-    // Hold any button to skip: what's held as the scene begins is ignored, a fresh press held 0.6 s skips, the skip is reported
-    // briefly and the button still held is ignored after, a new scene starts after a gap
+    // Hold any button to skip: what's held as the scene begins is ignored, a fresh press held the hold's time skips, the skip is
+    // reported briefly and the button still held is ignored after, a new scene starts after a gap. The times follow the hold's
+    // (SkipHoldSeconds, features.cpp)
     SetOption(OptionSkipCutscenes, 1);
+    const f32 needed = SkipHoldSecondsForTest();
     // A scene's polls, a frame's apart (1/60 s), from a time to a time with the inputs held: whether the last one skipped, and
     // whether any did
     f32 clock = 0.0f;
@@ -737,19 +767,23 @@ void TestControls()
     hold({Space}, 1.0f);
     Check(!any, "skip: held as the scene began, ignored");
     hold({}, 1.1f);
-    hold({MouseLeft}, 1.4f);
-    Check(!any && SkipHoldProgress() > 0.4f && SkipHoldProgress() < 0.6f, "skip: a fresh press, the bar half full (%.2f)",
+    // The press starts at the next poll: held about half the time
+    f32 pressed = clock;
+    hold({MouseLeft}, pressed + needed * 0.5f);
+    Check(!any && SkipHoldProgress() > 0.25f && SkipHoldProgress() < 0.75f, "skip: a fresh press, the bar half full (%.2f)",
           SkipHoldProgress());
-    hold({MouseLeft}, 1.75f);
-    Check(any, "skip: held 0.6 s, skipped");
-    hold({MouseLeft}, 2.5f);
-    Check(!hold({MouseLeft}, 2.6f) && SkipHoldProgress() < 0.0f, "skip: still held after, ignored");
-    hold({Space}, 2.9f);
-    Check(!any, "skip: let go of too soon (0.3 s)");
+    hold({MouseLeft}, pressed + needed + 0.05f);
+    Check(any, "skip: held %.2f s, skipped", needed);
+    hold({MouseLeft}, pressed + needed + 0.8f);
+    Check(!hold({MouseLeft}, pressed + needed + 0.9f) && SkipHoldProgress() < 0.0f, "skip: still held after, ignored");
+    hold({}, clock + 0.1f);
+    pressed = clock;
+    hold({Space}, pressed + needed * 0.5f);
+    Check(!any, "skip: let go of too soon (%.2f s)", needed * 0.5f);
     // A gap: the next scene
     clock += 1.0f;
     hold({}, clock + 0.1f);
-    hold({PadSouth}, clock + 0.65f);
+    hold({PadSouth}, clock + needed + 0.05f);
     Check(any, "skip: the next scene, a pad button");
     SetOption(OptionSkipCutscenes, 0);
     clock += 1.0f;
@@ -758,7 +792,8 @@ void TestControls()
     Check(!any && SkipHoldProgress() < 0.0f, "skip: off, never");
     SetOption(OptionSkipCutscenes, 1);
     SkipHoldForTest(false, {}, 0.0f);
-    Native::Log("ui self-test: the keyboard and mouse scheme, mouse look and the hold-any-button skip checked");
+    Native::Log("ui self-test: the keyboard and mouse scheme, a gamepad stick's square, mouse look and the hold-any-button skip "
+                "checked");
 }
 
 // --dump-button-art DIR: the Xbox's glyphs read from the Xbox disc (and the Switch's made from them) as PNGs, for looking at
@@ -770,7 +805,8 @@ int DumpButtonArt(const char* folder)
         return 1;
     }
 
-    std::filesystem::create_directories(folder);
+    std::error_code created;
+    std::filesystem::create_directories(folder, created);
     constexpr const char* Names[ButtonArtLabels] = {"a", "b", "x", "y", "left_shoulder", "right_shoulder", "left_trigger", "right_trigger"};
     for (PromptStyle style : {PromptXbox, PromptSwitch})
     {
@@ -791,9 +827,116 @@ int DumpButtonArt(const char* folder)
     return 0;
 }
 
+// ------------------------------------------------------------------------------------------------------------------- mods
+// --list-files: the archive's files (CRASH6\CRASH.BD's: the levels, the texts...), their paths as the mods folder takes them and
+// their sizes. --extract=PATH: one of them, or one of the disc's own (FMV\H01_A.PSS), copied into the settings folder's mods
+// folder at its path, to be changed there (native/WINDOWS.md, "Mods"); a file already there is left as it is
+int ListFiles()
+{
+    Archive archive;
+    if (!OpenArchive(&archive))
+    {
+        return 1;
+    }
+
+    for (const auto& [upper, name] : archive.names)
+    {
+        std::string path = name;
+        std::replace(path.begin(), path.end(), '\\', '/');
+        std::printf("%10u  %s\n", archive.files[upper].second, path.c_str());
+    }
+
+    std::printf("%zu files in the archive; the disc's own: FMV/*.PSS (the movies), CRASH6/*.MB and *.MH (the music and the "
+                "voices' banks)\n", archive.names.size());
+    std::fflush(stdout);
+    return 0;
+}
+
+int ExtractFile(std::string path)
+{
+    std::replace(path.begin(), path.end(), '\\', '/');
+    while (!path.empty() && path.front() == '/')
+    {
+        path.erase(path.begin());
+    }
+
+    Archive archive;
+    if (!OpenArchive(&archive))
+    {
+        return 1;
+    }
+
+    std::string key = path;
+    std::replace(key.begin(), key.end(), '/', '\\');
+    key = Upper(key);
+    u64 offset = 0;
+    u32 size = 0;
+    std::string name = path;
+    auto found = archive.files.find(key);
+    if (found != archive.files.end())
+    {
+        offset = archive.data.offset + found->second.first;
+        size = found->second.second;
+        name = archive.names[key];
+        std::replace(name.begin(), name.end(), '\\', '/');
+    }
+    else
+    {
+        Native::Disc::Entry entry;
+        if (!Native::Disc::Find(path.c_str(), &entry))
+        {
+            std::fprintf(stderr, "no %s in the archive or on the disc (--list-files lists them)\n", path.c_str());
+            return 1;
+        }
+
+        offset = entry.offset;
+        size = entry.size;
+    }
+
+    const std::filesystem::path out = (std::filesystem::path(Native::SettingsFolder()) / "mods" / std::filesystem::path(name)).make_preferred();
+    std::error_code error;
+    if (std::filesystem::exists(out, error))
+    {
+        std::fprintf(stderr, "%s is there already (left as it is)\n", out.string().c_str());
+        return 1;
+    }
+
+    std::filesystem::create_directories(out.parent_path(), error);
+    std::vector<u8> bytes(size);
+    if (Native::Disc::Read(offset, bytes.data(), size) != size)
+    {
+        std::fprintf(stderr, "%s couldn't be read\n", path.c_str());
+        return 1;
+    }
+
+    std::ofstream file(out, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file)
+    {
+        std::fprintf(stderr, "%s couldn't be written\n", out.string().c_str());
+        return 1;
+    }
+
+    std::printf("%s (%u bytes) -> %s\n", name.c_str(), size, out.string().c_str());
+    std::fflush(stdout);
+    return 0;
+}
+
 bool RunCommand(const char* argument, int* status)
 {
     std::string_view command(argument);
+    if (command == "--list-files")
+    {
+        *status = ListFiles();
+        return true;
+    }
+
+    if (command.starts_with("--extract="))
+    {
+        *status = ExtractFile(std::string(command.substr(std::strlen("--extract="))));
+        return true;
+    }
+
     if (command == "--dump-button-art")
     {
         const char* folder = std::getenv("TWIN_UI_ART_OUT");

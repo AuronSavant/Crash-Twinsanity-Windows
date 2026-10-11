@@ -120,6 +120,13 @@ void Platform::Stream::Read(s32, s32 file, u32 offset, u32 size, void* destinati
         return;
     }
 
+    // (An archive's file's mod is past the archive's end: read as it is)
+    if (Native::Disc::IsMod(found->second.offset + offset))
+    {
+        Native::Disc::Read(found->second.offset + offset, destination, size);
+        return;
+    }
+
     u32 available = offset < found->second.size ? found->second.size - offset : 0;
     Native::Disc::Read(found->second.offset + offset, destination, size < available ? size : available);
 }

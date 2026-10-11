@@ -7,6 +7,10 @@
 #include "platform/stream.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "native.h"
+#endif
+
 namespace
 {
 constexpr const char* NoPath = "Nothing";
@@ -291,6 +295,15 @@ extern "C"
             {
                 return false;
             }
+
+#ifdef TWIN_NATIVE
+            // A mod's file instead of the archive's (the settings folder's mods folder at its path: native/WINDOWS.md, "Mods")
+            ArchiveEntry modded;
+            if (Native::Disc::FindArchiveMod(path, &modded.start, &modded.size))
+            {
+                entry = &modded;
+            }
+#endif
 
             StringAssign(&stream->path, path);
             stream->start = entry->start;

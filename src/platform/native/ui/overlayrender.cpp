@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <map>
 #include <tuple>
@@ -29,7 +30,8 @@ using GLboolean = unsigned char;
 using GLchar = char;
 using GLbitfield = unsigned int;
 using GLfloat = float;
-using GLsizeiptr = long;
+// The pointer's width (long is 32 bits on Windows)
+using GLsizeiptr = std::ptrdiff_t;
 
 constexpr GLenum GL_TRIANGLES = 0x0004;
 constexpr GLenum GL_BLEND = 0x0BE2;

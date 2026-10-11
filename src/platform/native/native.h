@@ -4,6 +4,7 @@
 #include "common.h"
 
 #include <cstdio>
+#include <ctime>
 #include <string>
 
 namespace Native
@@ -30,6 +31,11 @@ void SnapshotFrame();
 void SetQuickStart(bool quick);
 void QuickStartFrame();
 
+// The local time of a moment (localtime_r, localtime_s on Windows)
+void LocalTime(std::time_t seconds, std::tm* local);
+// An environment variable set (value) or removed (nullptr): setenv and unsetenv, _putenv_s on Windows
+void SetEnvironment(const char* name, const char* value);
+
 // The log (stderr): the platform's messages, prefixed
 void Log(const char* format, ...) __attribute__((format(printf, 1, 2)));
 [[noreturn]] void Fatal(const char* format, ...) __attribute__((format(printf, 1, 2)));
@@ -51,6 +57,11 @@ bool Open(const char* path);
 bool Find(const char* path, Entry* entry);
 // Reads from the image: how many bytes were read
 u32 Read(u64 offset, void* destination, u32 size);
+// Mods (disc.cpp): a file of the archive (CRASH6\CRASH.BD's: "Levels\Earth\Hub\beach.rm2") in the settings folder's mods
+// folder at its path: its start (from the archive's) and size, past the image's end; whether an image offset is a mod's (read
+// whatever the file it was opened as says its size is)
+bool FindArchiveMod(const char* path, u32* start, u32* size);
+bool IsMod(u64 offset);
 }
 
 // The sound processor's memory (the SPU2's 2 MB), where sound banks are streamed to: the audio side plays from it

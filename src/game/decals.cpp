@@ -10,6 +10,10 @@
 
 #include "platform/graphics.h"
 
+#ifdef TWIN_NATIVE
+#include "ui/nativeui.h"
+#endif
+
 namespace
 {
 constexpr s32 BlockCount = DecalData::BlockCount;
@@ -381,6 +385,14 @@ extern "C"
         }
 
         s32 lifeStep = NoTime < delta ? -1 : 0;
+#ifdef TWIN_NATIVE
+        // Their lives in 60ths of a second: past 60 frames a second, as many as went by
+        static f32 carried = 0.0f;
+        if (lifeStep != 0)
+        {
+            lifeStep = -static_cast<s32>(NativeUi::GameTicks(delta, &carried));
+        }
+#endif
         for (s32 type = 0; type < TypeCount; type++)
         {
             if (decals->typeBlocks[type] == nullptr)

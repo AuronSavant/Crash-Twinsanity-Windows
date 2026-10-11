@@ -190,9 +190,10 @@ extern "C"
             controller->frameTime = stamp - controller->lastStamp;
 #ifdef TWIN_NATIVE
             // A frame's time at most two of the game's frames: a frame far slower than the PS2 ever ran (the native renderer at
-            // its slowest) makes the game slower rather than taking steps its physics wasn't made for (jumps cut short)
-            s32 most = static_cast<s32>((static_cast<u32>(controller->ticksPerSecond) / static_cast<u32>(controller->framesPerSecond)
-                                         * 2) >> controller->shift);
+            // its slowest) makes the game slower rather than taking steps its physics wasn't made for (jumps cut short). Two of
+            // its 60 Hz frames at the frame rates past 60 (a slower frame among faster ones isn't cut short)
+            u32 rate = static_cast<u32>(controller->framesPerSecond) > 60 ? 60 : static_cast<u32>(controller->framesPerSecond);
+            s32 most = static_cast<s32>((static_cast<u32>(controller->ticksPerSecond) / rate * 2) >> controller->shift);
             if (most > 0 && controller->frameTime > most)
             {
                 controller->frameTime = most;

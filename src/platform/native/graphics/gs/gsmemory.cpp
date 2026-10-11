@@ -3,159 +3,13 @@
 #include "gs.h"
 #include "backend.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 namespace Gs
 {
-namespace
-{
-// The blocks of a page: 32 blocks of 256 bytes. A 32 bit page is 8 by 4 blocks of 8 by 8 pixels, a 16 bit one 4 by 8 of 16 by 8,
-// an 8 bit one 8 by 4 of 16 by 16, a 4 bit one 4 by 8 of 32 by 16. The blocks are numbered in a Z order of their x and y bits
-constexpr u32 Block32(u32 bx, u32 by)
-{
-    return (bx & 1) | (by & 1) << 1 | (bx & 2) << 1 | (by & 2) << 2 | (bx & 4) << 2;
-}
-
-constexpr u32 Block16(u32 bx, u32 by)
-{
-    return (by & 1) | (bx & 1) << 1 | (by & 2) << 1 | (bx & 2) << 2 | (by & 4) << 2;
-}
-
-// PSMCT16S: the 16 bit page's blocks with the x bit 1 and y bit 2 swapped
-constexpr u32 Block16S(u32 bx, u32 by)
-{
-    return (by & 1) | (bx & 1) << 1 | (by & 4) | (by & 2) << 2 | (bx & 2) << 3;
-}
-
-// The pixels of a block: 4 columns (each 64 bytes), a 32 bit column 8 by 2 pixels, a 16 bit one 16 by 2
-constexpr u32 Column32(u32 x, u32 y)
-{
-    return (x & 1) | (y & 1) << 1 | (x & 6) << 1 | (y & 6) << 3;
-}
-
-constexpr u32 Column16(u32 x, u32 y)
-{
-    return (x & 8) >> 3 | (x & 1) << 1 | (y & 1) << 2 | (x & 2) << 2 | (x & 4) << 2 | (y & 6) << 4;
-}
-
-// The 8 and 4 bit columns (16 by 4 and 32 by 4 pixels) interleave their pixels across the column's words in a pattern that
-// changes every other column: the manual's tables
-constexpr u8 Column8Table[16][16] = {
-    {0, 4, 16, 20, 32, 36, 48, 52, 2, 6, 18, 22, 34, 38, 50, 54},
-    {8, 12, 24, 28, 40, 44, 56, 60, 10, 14, 26, 30, 42, 46, 58, 62},
-    {33, 37, 49, 53, 1, 5, 17, 21, 35, 39, 51, 55, 3, 7, 19, 23},
-    {41, 45, 57, 61, 9, 13, 25, 29, 43, 47, 59, 63, 11, 15, 27, 31},
-    {96, 100, 112, 116, 64, 68, 80, 84, 98, 102, 114, 118, 66, 70, 82, 86},
-    {104, 108, 120, 124, 72, 76, 88, 92, 106, 110, 122, 126, 74, 78, 90, 94},
-    {65, 69, 81, 85, 97, 101, 113, 117, 67, 71, 83, 87, 99, 103, 115, 119},
-    {73, 77, 89, 93, 105, 109, 121, 125, 75, 79, 91, 95, 107, 111, 123, 127},
-    {128, 132, 144, 148, 160, 164, 176, 180, 130, 134, 146, 150, 162, 166, 178, 182},
-    {136, 140, 152, 156, 168, 172, 184, 188, 138, 142, 154, 158, 170, 174, 186, 190},
-    {161, 165, 177, 181, 129, 133, 145, 149, 163, 167, 179, 183, 131, 135, 147, 151},
-    {169, 173, 185, 189, 137, 141, 153, 157, 171, 175, 187, 191, 139, 143, 155, 159},
-    {224, 228, 240, 244, 192, 196, 208, 212, 226, 230, 242, 246, 194, 198, 210, 214},
-    {232, 236, 248, 252, 200, 204, 216, 220, 234, 238, 250, 254, 202, 206, 218, 222},
-    {193, 197, 209, 213, 225, 229, 241, 245, 195, 199, 211, 215, 227, 231, 243, 247},
-    {201, 205, 217, 221, 233, 237, 249, 253, 203, 207, 219, 223, 235, 239, 251, 255},
-};
-
-// The 4 bit column table (a column 32 by 4 pixels, 128 nibbles): pixel i of each group of 8 across goes to nibble
-// (i & 1) * 8 + (i >> 1) * 32 plus the group's 2, the second row 16 further; the third and fourth rows take the odd nibbles, and
-// the halves of each group trade places in every other row pair (starting with the second pair in even columns, the first in odd
-// ones)
-struct Column4
-{
-    u16 value[16][32];
-};
-
-constexpr Column4 MakeColumn4()
-{
-    Column4 table = {};
-    for (u32 y = 0; y < 16; y++)
-    {
-        u32 column = y >> 2;
-        u32 row = y & 3;
-        for (u32 x = 0; x < 32; x++)
-        {
-            u32 group = x >> 3;
-            u32 i = x & 7;
-            bool swapped = ((row >> 1) ^ (column & 1)) != 0;
-            u32 j = swapped ? i ^ 4 : i;
-            u32 nibble = (row & 1) * 16 + group * 2 + (j & 1) * 8 + (j >> 1) * 32 + (row >> 1);
-            table.value[y][x] = static_cast<u16>(column * 128 + nibble);
-        }
-    }
-
-    return table;
-}
-
-constexpr Column4 Column4Table = MakeColumn4();
-
-// The 8 bit columns follow the same scheme over bytes
-constexpr u32 Column8(u32 x, u32 y)
-{
-    return Column8Table[y & 15][x & 15];
-}
-
-constexpr u32 BlockMask = BlockCount - 1;
-}
-
-u32 PixelAddress32(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 5) * bw + (x >> 6);
-    u32 block = (bp + page * 32 + Block32((x >> 3) & 7, (y >> 3) & 3)) & BlockMask;
-    return block << 6 | Column32(x & 7, y & 7);
-}
-
-u32 PixelAddress32Z(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 5) * bw + (x >> 6);
-    u32 block = ((bp + page * 32 + Block32((x >> 3) & 7, (y >> 3) & 3)) ^ 0x18) & BlockMask;
-    return block << 6 | Column32(x & 7, y & 7);
-}
-
-u32 PixelAddress16(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 6) * bw + (x >> 6);
-    u32 block = (bp + page * 32 + Block16((x >> 4) & 3, (y >> 3) & 7)) & BlockMask;
-    return block << 7 | Column16(x & 15, y & 7);
-}
-
-u32 PixelAddress16S(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 6) * bw + (x >> 6);
-    u32 block = (bp + page * 32 + Block16S((x >> 4) & 3, (y >> 3) & 7)) & BlockMask;
-    return block << 7 | Column16(x & 15, y & 7);
-}
-
-u32 PixelAddress16Z(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 6) * bw + (x >> 6);
-    u32 block = ((bp + page * 32 + Block16((x >> 4) & 3, (y >> 3) & 7)) ^ 0x18) & BlockMask;
-    return block << 7 | Column16(x & 15, y & 7);
-}
-
-u32 PixelAddress16SZ(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 6) * bw + (x >> 6);
-    u32 block = ((bp + page * 32 + Block16S((x >> 4) & 3, (y >> 3) & 7)) ^ 0x18) & BlockMask;
-    return block << 7 | Column16(x & 15, y & 7);
-}
-
-// 8 and 4 bit pages are 128 pixels wide: the buffer width (in 64 pixels) is halved for them
-u32 PixelAddress8(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 6) * (bw >> 1) + (x >> 7);
-    u32 block = (bp + page * 32 + Block32((x >> 4) & 7, (y >> 4) & 3)) & BlockMask;
-    return block << 8 | Column8(x, y);
-}
-
-u32 PixelAddress4(u32 x, u32 y, u32 bp, u32 bw)
-{
-    u32 page = (y >> 7) * (bw >> 1) + (x >> 7);
-    u32 block = (bp + page * 32 + Block16((x >> 5) & 3, (y >> 4) & 7)) & BlockMask;
-    return block << 9 | Column4Table.value[y & 15][x & 31];
-}
+using namespace MemoryLayout;
 
 u32 BitsPerPixel(u32 psm)
 {
@@ -357,14 +211,12 @@ u32 PixelPage(u32 psm, u32 x, u32 y, u32 bp, u32 bw)
     }
 }
 
-void PagesOfRect(u32 psm, u32 bp, u32 bw, s32 left, s32 top, s32 right, s32 bottom, PageSet& pages)
+namespace
 {
-    if (right < left || bottom < top)
-    {
-        return;
-    }
-
-    // Every block of every format is at least 8 pixels each way: a pixel every 8 (and the last row and column) meets them all
+// The pages of a rectangle by its pixels' addresses: every block of every format is at least 8 pixels each way, so a pixel every 8
+// (and the last row and column) meets them all
+void PagesOfRectByPixels(u32 psm, u32 bp, u32 bw, s32 left, s32 top, s32 right, s32 bottom, PageSet& pages)
+{
     auto columns = [&](s32 y) {
         for (s32 x = left;; x += 8)
         {
@@ -384,6 +236,125 @@ void PagesOfRect(u32 psm, u32 bp, u32 bw, s32 left, s32 top, s32 right, s32 bott
         {
             break;
         }
+    }
+}
+
+// A pixel's page is (bp + its page in the buffer * 32 + its block in the page) >> 5, the block below 32 (the Z formats' XOR only
+// swaps blocks within a page): with bp a page's start, each page sized region of the buffer is one page, so the pages are those
+// of the regions the rectangle meets, the same set as PagesOfRectByPixels gives, without working out the pixels' addresses (the
+// hardware renderer asks this for every primitive's buffers). False when bp isn't a page's start or the rectangle wraps
+bool PagesOfRectByRegions(u32 psm, u32 bp, u32 bw, s32 left, s32 top, s32 right, s32 bottom, PageSet& pages)
+{
+    if ((bp & 31) != 0 || left < 0 || top < 0 || right >= 2048 || bottom >= 2048)
+    {
+        return false;
+    }
+
+    u32 widthShift = 6;
+    u32 heightShift = 5;
+    u32 pagesPerRow = bw;
+    switch (psm)
+    {
+    case PSMCT16:
+    case PSMCT16S:
+    case PSMZ16:
+    case PSMZ16S:
+        heightShift = 6;
+        break;
+    case PSMT8:
+        widthShift = 7;
+        heightShift = 6;
+        pagesPerRow = bw >> 1;
+        break;
+    case PSMT4:
+        widthShift = 7;
+        heightShift = 7;
+        pagesPerRow = bw >> 1;
+        break;
+    default:
+        break;
+    }
+
+    u32 first = bp >> 5;
+    for (u32 row = static_cast<u32>(top) >> heightShift; row <= static_cast<u32>(bottom) >> heightShift; row++)
+    {
+        for (u32 column = static_cast<u32>(left) >> widthShift; column <= static_cast<u32>(right) >> widthShift; column++)
+        {
+            pages.set((first + row * pagesPerRow + column) & (PageCount - 1));
+        }
+    }
+
+    return true;
+}
+
+// $TWIN_GS_CHECK_PAGES: the regions' pages checked against the pixels' (random rectangles of every format once, then every call)
+bool CheckPages()
+{
+    static const bool check = std::getenv("TWIN_GS_CHECK_PAGES") != nullptr;
+    static bool tested = false;
+    if (check && !tested)
+    {
+        tested = true;
+        static const u32 formats[] = {PSMCT32, PSMCT24, PSMCT16, PSMCT16S, PSMT8, PSMT4, PSMT8H, PSMT4HL, PSMT4HH,
+                                      PSMZ32,  PSMZ24,  PSMZ16,  PSMZ16S};
+        u32 seed = 12345;
+        auto next = [&](u32 below) {
+            seed = seed * 1664525u + 1013904223u;
+            return (seed >> 8) % below;
+        };
+        u32 mismatches = 0;
+        for (u32 i = 0; i < 200000; i++)
+        {
+            u32 psm = formats[next(sizeof(formats) / sizeof(formats[0]))];
+            u32 bp = next(512) * 32;
+            u32 bw = 1 + next(32);
+            s32 left = static_cast<s32>(next(1024));
+            s32 top = static_cast<s32>(next(1024));
+            s32 right = left + static_cast<s32>(next(i % 4 == 0 ? 1024 : 64));
+            s32 bottom = top + static_cast<s32>(next(i % 4 == 0 ? 1024 : 64));
+            PageSet byPixels;
+            PageSet byRegions;
+            PagesOfRectByPixels(psm, bp, bw, left, top, right, bottom, byPixels);
+            PagesOfRectByRegions(psm, bp, bw, left, top, right, bottom, byRegions);
+            if (byPixels != byRegions && mismatches++ < 8)
+            {
+                std::fprintf(stderr, "[native] gs pages: psm %x bp %x bw %u %d,%d-%d,%d: %zu pages by pixels, %zu by regions\n", psm, bp,
+                             bw, left, top, right, bottom, byPixels.count(), byRegions.count());
+            }
+        }
+
+        std::fprintf(stderr, "[native] gs pages: 200000 rectangles checked, %u mismatches\n", mismatches);
+    }
+
+    return check;
+}
+}
+
+void PagesOfRect(u32 psm, u32 bp, u32 bw, s32 left, s32 top, s32 right, s32 bottom, PageSet& pages)
+{
+    if (right < left || bottom < top)
+    {
+        return;
+    }
+
+    if (CheckPages())
+    {
+        PageSet byPixels;
+        PageSet byRegions;
+        PagesOfRectByPixels(psm, bp, bw, left, top, right, bottom, byPixels);
+        if (PagesOfRectByRegions(psm, bp, bw, left, top, right, bottom, byRegions) && byRegions != byPixels)
+        {
+            std::fprintf(stderr, "[native] gs pages mismatch: psm %x bp %x bw %u %d,%d-%d,%d\n", psm, bp, bw, left, top, right, bottom);
+        }
+
+        pages |= byPixels;
+        return;
+    }
+
+    static const bool byRegions = std::getenv("TWIN_GS_PAGES_BY_PIXELS") == nullptr;
+    if (!byRegions || !PagesOfRectByRegions(psm, bp, bw, left, top, right, bottom, pages))
+    {
+        PagesOfRectByPixels(psm, bp, bw, left, top, right, bottom, pages);
     }
 }
 

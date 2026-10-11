@@ -80,6 +80,11 @@ class RenderThread final : public Ee::Gif::Forward
 public:
     void Start();
     void Stop();
+    // The VU stage ($TWIN_RENDER_THREAD=vu): VIF1 and VU1 on a thread of their own between the game's and the render thread, what
+    // they send the GIF (and everything else the game queued, in its place) handed on to the render thread's queue
+    void StartStage(RenderThread* next);
+    void Kicked(const u8* row, u32 quadwords, u32 source);
+    void WaitIdle();
 
     // The game's side
     void Transfer(u32 path, const u8* data, u32 quadwords) override;
@@ -115,14 +120,41 @@ private:
     u64 framesMade_ = 0;
     // The chunk being filled (the game's side)
     Chunk* filling_ = nullptr;
+    // The VU stage's: the render thread's queue it hands on to
+    RenderThread* next_ = nullptr;
 };
 
 RenderThread g_RenderThread;
+RenderThread g_VuThread;
 std::atomic<bool> g_Active{false};
+// Three stages (the game's, VIF1 and VU1's, the GS's): the game's side queues to the VU stage
+bool g_ThreeStages = false;
 thread_local bool t_OnRenderThread = false;
+thread_local bool t_OnVuThread = false;
 int g_Wanted = -1;
 int g_Vu1There = -1;
 bool g_Tried = false;
+
+// $TWIN_RENDER_THREAD: three stages unless it says otherwise (0: none, everything on the game's thread; gs: the render thread
+// only, VIF1 and VU1 on the game's; vif: VIF1 and VU1 on the render thread)
+const char* RenderThreadSetting()
+{
+    const char* setting = std::getenv("TWIN_RENDER_THREAD");
+    return setting != nullptr ? setting : "vu";
+}
+
+bool ThreeStagesWanted()
+{
+    const char* setting = RenderThreadSetting();
+    return std::strcmp(setting, "vu") == 0 || std::strcmp(setting, "1") == 0;
+}
+
+// The queue the calling thread puts the GS's work in: the VU stage's for the game's thread when there are three, the render
+// thread's for the VU stage's thread (or the game's when there are two)
+RenderThread& Producing()
+{
+    return g_ThreeStages && !t_OnVuThread ? g_VuThread : g_RenderThread;
+}
 
 Chunk* RenderThread::Take()
 {
@@ -173,6 +205,13 @@ void RenderThread::Transfer(u32 path, const u8* data, u32 quadwords)
         return;
     }
 
+    // (VIF1 and VU1 on the VU stage's thread: theirs to the render thread's queue)
+    if (t_OnVuThread && next_ != nullptr)
+    {
+        next_->Transfer(path, data, quadwords);
+        return;
+    }
+
     if (quadwords == 0)
     {
         return;
@@ -189,6 +228,12 @@ void RenderThread::Kick(const u8* vuMemory, u32 address, u32 quadwords, u32 sour
         return;
     }
 
+    if (t_OnVuThread && next_ != nullptr)
+    {
+        next_->Kick(vuMemory, address, quadwords, source);
+        return;
+    }
+
     // The ring's quadwords from the address, wrapping at its end
     constexpr u32 Ring = 0x400;
     u8* to = Record(RecordKick, source, quadwords);
@@ -196,6 +241,12 @@ void RenderThread::Kick(const u8* vuMemory, u32 address, u32 quadwords, u32 sour
     u32 first = std::min(quadwords, Ring - at);
     std::memcpy(to, vuMemory + at * 16, static_cast<size_t>(first) * 16);
     std::memcpy(to + first * 16, vuMemory, static_cast<size_t>(quadwords - first) * 16);
+}
+
+// A kick already laid out in a row (the VU stage handing on one the game's thread queued)
+void RenderThread::Kicked(const u8* row, u32 quadwords, u32 source)
+{
+    std::memcpy(Record(RecordKick, source, quadwords), row, static_cast<size_t>(quadwords) * 16);
 }
 
 void RenderThread::Call(std::function<void()> work)
@@ -229,9 +280,25 @@ void RenderThread::Sync()
 {
     Flush();
     auto began = std::chrono::steady_clock::now();
+    {
+        std::unique_lock lock(lock_);
+        done_.wait(lock, [this] { return played_ == handed_; });
+    }
+
+    // (The VU stage hands on each chunk it plays before it counts it played: the render thread's queue has all of it)
+    if (next_ != nullptr)
+    {
+        next_->WaitIdle();
+    }
+
+    waitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - began).count();
+}
+
+// Everything handed over played (the producer's flushed it)
+void RenderThread::WaitIdle()
+{
     std::unique_lock lock(lock_);
     done_.wait(lock, [this] { return played_ == handed_; });
-    waitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - began).count();
 }
 
 u64 RenderThread::QueueFrame(std::function<void(u64 frame)> show)
@@ -268,6 +335,31 @@ void RenderThread::Play(Chunk& chunk)
         Header header;
         std::memcpy(&header, at, sizeof(header));
         at += sizeof(Header);
+        if (next_ != nullptr)
+        {
+            // The VU stage: the GIF's data and the work handed on in their places, VIF1's run here
+            switch (header.kind)
+            {
+            case RecordTransfer:
+                next_->Transfer(header.value, at, header.quadwords);
+                break;
+            case RecordKick:
+                next_->Kicked(at, header.quadwords, header.value);
+                break;
+            case RecordCall:
+                next_->Call(std::move(chunk.calls[header.value]));
+                break;
+            case RecordVif1:
+                GetHardware().vif1->Process(reinterpret_cast<const u32*>(at), header.value);
+                break;
+            default:
+                break;
+            }
+
+            at += static_cast<size_t>(header.quadwords) * 16;
+            continue;
+        }
+
         switch (header.kind)
         {
         case RecordTransfer:
@@ -292,8 +384,16 @@ void RenderThread::Play(Chunk& chunk)
 
 void RenderThread::Run()
 {
-    t_OnRenderThread = true;
-    UseRenderContext();
+    if (next_ != nullptr)
+    {
+        t_OnVuThread = true;
+    }
+    else
+    {
+        t_OnRenderThread = true;
+        UseRenderContext();
+    }
+
     for (;;)
     {
         Chunk* chunk;
@@ -311,6 +411,11 @@ void RenderThread::Run()
 
         auto began = std::chrono::steady_clock::now();
         Play(*chunk);
+        if (next_ != nullptr)
+        {
+            next_->Flush();
+        }
+
         chunk->calls.clear();
         chunk->size = 0;
         if (chunk->capacity > KeptChunkBytes)
@@ -330,7 +435,10 @@ void RenderThread::Run()
         done_.notify_all();
     }
 
-    ReleaseRenderContext();
+    if (next_ == nullptr)
+    {
+        ReleaseRenderContext();
+    }
 }
 
 void RenderThread::Start()
@@ -349,11 +457,34 @@ void RenderThread::Start()
     g_Active = true;
 }
 
+void RenderThread::StartStage(RenderThread* next)
+{
+    next_ = next;
+    stopping_ = false;
+    thread_ = std::thread([this] { Run(); });
+    GetHardware().gif->SetForward(this);
+}
+
 void RenderThread::Stop()
 {
     if (!g_Active)
     {
         return;
+    }
+
+    // The VU stage first (what it holds handed on), then the render thread
+    if (g_ThreeStages && this == &g_RenderThread)
+    {
+        g_VuThread.Sync();
+        {
+            std::lock_guard lock(g_VuThread.lock_);
+            g_VuThread.stopping_ = true;
+        }
+
+        g_VuThread.work_.notify_one();
+        g_VuThread.thread_.join();
+        g_ThreeStages = false;
+        GetHardware().gif->SetForward(this);
     }
 
     Sync();
@@ -396,13 +527,20 @@ void StartRenderThread()
     g_RenderThread.Start();
     if (g_Active)
     {
+        // VIF1 and VU1 on a thread of their own (the game's thread had them, half its time where the scenes are big)
+        if (ThreeStagesWanted())
+        {
+            g_ThreeStages = true;
+            g_VuThread.StartStage(&g_RenderThread);
+        }
+
         std::atexit([] { StopRenderThread(); });
     }
 }
 
 void StopRenderThread()
 {
-    if (!OnRenderThread())
+    if (!OnRenderThread() && !t_OnVuThread)
     {
         g_RenderThread.Stop();
     }
@@ -431,7 +569,7 @@ void RenderCall(std::function<void()> work)
         return;
     }
 
-    g_RenderThread.Call(std::move(work));
+    Producing().Call(std::move(work));
 }
 
 void RenderCallAndWait(const std::function<void()>& work)
@@ -442,15 +580,16 @@ void RenderCallAndWait(const std::function<void()>& work)
         return;
     }
 
-    g_RenderThread.Call([&work] { work(); });
-    g_RenderThread.Sync();
+    RenderThread& queue = Producing();
+    queue.Call([&work] { work(); });
+    queue.Sync();
 }
 
 void RenderSync()
 {
     if (RenderThreadActive() && !t_OnRenderThread)
     {
-        g_RenderThread.Sync();
+        Producing().Sync();
     }
 }
 
@@ -458,26 +597,25 @@ void RenderFlush()
 {
     if (RenderThreadActive() && !t_OnRenderThread)
     {
-        g_RenderThread.Flush();
+        Producing().Flush();
     }
 }
 
 u64 RenderQueueFrame(std::function<void(u64 frame)> show)
 {
-    return g_RenderThread.QueueFrame(std::move(show));
+    return Producing().QueueFrame(std::move(show));
 }
 
 void RenderWaitFrame(u64 frame)
 {
-    g_RenderThread.WaitFrame(frame);
+    Producing().WaitFrame(frame);
 }
 
 bool RenderThreadRunsVu1()
 {
     if (g_Vu1There < 0)
     {
-        const char* setting = std::getenv("TWIN_RENDER_THREAD");
-        g_Vu1There = setting != nullptr && std::strcmp(setting, "vif") == 0 ? 1 : 0;
+        g_Vu1There = ThreeStagesWanted() || std::strcmp(RenderThreadSetting(), "vif") == 0 ? 1 : 0;
     }
 
     return g_Vu1There == 1 && RenderThreadActive();
@@ -485,7 +623,7 @@ bool RenderThreadRunsVu1()
 
 void RenderQueueVif1(const u32* words, u32 count)
 {
-    g_RenderThread.Vif1(words, count);
+    Producing().Vif1(words, count);
 }
 
 u64 RenderBusyNanoseconds()
@@ -495,6 +633,6 @@ u64 RenderBusyNanoseconds()
 
 u64 RenderWaitNanoseconds()
 {
-    return g_RenderThread.waitNanoseconds.load(std::memory_order_relaxed);
+    return Producing().waitNanoseconds.load(std::memory_order_relaxed);
 }
 }

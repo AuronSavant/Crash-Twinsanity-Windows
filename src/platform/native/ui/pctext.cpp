@@ -479,6 +479,16 @@ const NativeTextLine g_NativeTexts[] = {
     {TextRefreshRate, {"refresh rate", "fréquence", "bildfrequenz", "frecuencia", "frequenza"}},
     {Text50Hz, {"50 hz", "50 hz", "50 hz", "50 hz", "50 hz"}},
     {Text60Hz, {"60 hz", "60 hz", "60 hz", "60 hz", "60 hz"}},
+    {Text120Hz, {"120 hz", "120 hz", "120 hz", "120 hz", "120 hz"}},
+    {Text144Hz, {"144 hz", "144 hz", "144 hz", "144 hz", "144 hz"}},
+    {TextUnlimited, {"unlimited", "illimitée", "unbegrenzt", "ilimitada", "illimitata"}},
+    {TextGameLanguage, {"language", "langue", "sprache", "idioma", "lingua"}},
+    {TextLanguageWindows, {"as windows", "comme windows", "wie windows", "como windows", "come windows"}},
+    {TextLanguageEnglish, {"english", "english", "english", "english", "english"}},
+    {TextLanguageFrench, {"français", "français", "français", "français", "français"}},
+    {TextLanguageGerman, {"deutsch", "deutsch", "deutsch", "deutsch", "deutsch"}},
+    {TextLanguageItalian, {"italiano", "italiano", "italiano", "italiano", "italiano"}},
+    {TextLanguageSpanish, {"español", "español", "español", "español", "español"}},
     {TextBugFixes, {"bug fixes", "corrections", "fehlerkorrekturen", "correcciones", "correzioni"}},
     {TextControls, {"controls", "commandes", "steuerung", "controles", "comandi"}},
     {TextResetControls, {"reset controls", "réinitialiser", "zurücksetzen", "restablecer", "ripristina"}},
@@ -538,7 +548,8 @@ const NativeTextLine g_NativeTexts[] = {
     {TextDescAntiAliasing, {"smooth the edges of 3d objects.", "lisser les bords des objets 3d.", "kanten von 3d-objekten glätten.", "suavizar los bordes 3d.", "leviga i bordi degli oggetti 3d."}},
     {TextDescVSync, {"wait for the screen's refresh: no tearing.", "synchronisé à l'écran: pas de déchirure.", "auf den bildschirm warten: kein tearing.", "sincronizar con la pantalla: sin cortes.", "sincronizza con lo schermo: niente tearing."}},
     {TextDescCrt, {"the look of an old crt television.", "l'aspect d'une vieille télévision.", "wie ein alter röhrenfernseher.", "el aspecto de una tele antigua.", "l'aspetto di un vecchio televisore."}},
-    {TextDescRefreshRate, {"50 hz is the original timing.", "50 hz est la cadence d'origine.", "50 hz ist das original.", "50 hz es el ritmo original.", "50 hz è la frequenza originale."}},
+    {TextDescGameLanguage, {"texts, voices and movies. from the game's next start.", "textes, voix et films. au prochain lancement du jeu.", "texte, stimmen und filme. ab dem nächsten spielstart.", "textos, voces y vídeos. al volver a abrir el juego.", "testi, voci e filmati. dal prossimo avvio del gioco."}},
+    {TextDescRefreshRate, {"50 hz is the original timing. above 60 needs a fast pc.", "50 hz est la cadence d'origine. au-delà de 60, un pc rapide.", "50 hz ist das original. über 60 braucht einen schnellen pc.", "50 hz es el ritmo original. más de 60 pide un pc rápido.", "50 hz è la frequenza originale. oltre 60 serve un pc veloce."}},
     {TextDescScreenPosition, {"move the picture on the screen.", "déplacer l'image à l'écran.", "das bild verschieben.", "mover la imagen en pantalla.", "sposta l'immagine sullo schermo."}},
     {TextDescMusic, {"the music's volume.", "le volume de la musique.", "die lautstärke der musik.", "el volumen de la música.", "il volume della musica."}},
     {TextDescEffects, {"the sound effects' volume.", "le volume des sons.", "die lautstärke der effekte.", "el volumen de los efectos.", "il volume degli effetti."}},
@@ -763,6 +774,12 @@ const char* Keep(const char* utf8)
     ToGameText(utf8, &g_Strings.back());
     return g_Strings.back().c_str();
 }
+}
+
+void ForgetTextLines()
+{
+    g_Lines.clear();
+    g_BaseLines.clear();
 }
 
 void SetPromptLabels(const char* const labels[PromptGlyphCount], const char* menuSelect, const char* menuBack)

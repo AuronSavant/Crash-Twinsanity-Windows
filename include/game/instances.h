@@ -284,6 +284,16 @@ struct InstanceIds
 };
 CHECK_OFFSET(InstanceIds, count, 0x800);
 
+#ifdef TWIN_NATIVE
+// (Native) Whether an instance is made and not destroyed. The retail code keeps pointers to instances (an object node's
+// AgentRef1 and AgentRef2) and tells one that went by its asleep flag, which its memory says until something else is made in
+// it: on the PS2 long enough, natively (the structures bigger, the memory used again sooner) not always, and the next look at
+// it read another object's data (a crash carrying Cortex's object into the next chunk of the caverns)
+bool InstanceLive(const struct InstanceContext* instance);
+// A pointer to an instance that's gone made none
+void ForgetFreedInstance(struct InstanceContext** instance);
+#endif
+
 // An instance's context (the game's objects' instances): a referenced object with its box (a corner of the default box, its W 1),
 // its nodes, the events queued for it, the places it keeps (a block of 0x190 bytes: a string, then 8 places), its seen stamp, the
 // index of the clock it goes by (of its chunk's clocks, else the game's) and its ID (NoId: none)

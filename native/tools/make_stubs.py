@@ -6,14 +6,34 @@ what the game reached that isn't there yet; nothing pretends to work.
 
     native/tools/make_stubs.py <out.cpp> <objects...>
 """
-import json, subprocess, sys
+import json, os, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[2]
-out, objects = Path(sys.argv[1]), sys.argv[2:]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import host  # noqa: E402
+
+WINDOWS = sys.platform == "win32"
+# The host's nm and c++filt: LLVM's next to the compiler on Windows (LLVM-MinGW has no c++filt of that name)
+if WINDOWS:
+    TOOLS = Path(host.CLANG).parent if os.path.dirname(host.CLANG) else Path(".")
+    NM = str(TOOLS / "llvm-nm.exe") if (TOOLS / "llvm-nm.exe").exists() else "llvm-nm"
+    CXXFILT = str(TOOLS / "llvm-cxxfilt.exe") if (TOOLS / "llvm-cxxfilt.exe").exists() else "llvm-cxxfilt"
+else:
+    NM, CXXFILT = "nm", "c++filt"
+
+out, objects = Path(sys.argv[1]), []
+for argument in sys.argv[2:]:
+    # @file: the objects one a line (native/CMakeLists.txt: Windows' command lines can't hold them all)
+    if argument.startswith("@"):
+        objects += [line.strip() for line in Path(argument[1:]).read_text().splitlines() if line.strip()]
+    else:
+        objects.append(argument)
 defined, undefined = set(), set()
-for chunk in range(0, len(objects), 200):
-    lines = subprocess.run(["nm", "-A"] + objects[chunk:chunk + 200], capture_output=True, text=True).stdout.splitlines()
+# Windows' command lines are at most 32767 characters
+CHUNK = 40 if WINDOWS else 200
+for chunk in range(0, len(objects), CHUNK):
+    lines = subprocess.run([NM, "-A"] + objects[chunk:chunk + CHUNK], capture_output=True, text=True).stdout.splitlines()
     for line in lines:
         parts = line.split()
         if len(parts) >= 3 and parts[-2] in "TtDdBbSsCVWR" and len(parts[-2]) == 1:
@@ -31,7 +51,7 @@ split_labels = {line.split()[1] for path in (HERE / "asm" / "data").glob("*.s") 
 retail_variables = {prefix + label for label, info in types.items() if info["kind"] == "var" and label in split_labels}
 
 def demangle(names):
-    result = subprocess.run(["c++filt"], input="\n".join(names), capture_output=True, text=True).stdout.splitlines()
+    result = subprocess.run([CXXFILT], input="\n".join(names), capture_output=True, text=True).stdout.splitlines()
     return dict(zip(names, result))
 
 # Functions the PS2 platform files define that the game calls by their C names (extern "C", no RETAIL): the console's services
@@ -53,6 +73,22 @@ def system_symbols():
         for library in Path("/opt/homebrew/lib").glob("libSDL3*.dylib"):
             found.update(l.split()[-1] for l in subprocess.run(["nm", "-gU", str(library)], capture_output=True,
                                                                text=True).stdout.splitlines() if l.strip())
+    elif WINDOWS:
+        # The MinGW runtime's and C++ library's (the toolchain's lib folder), Windows' own import libraries, SDL's and FFmpeg's
+        # ($TWIN_HOST_LIBS, the import libraries the build links)
+        libraries = []
+        for folder in (TOOLS.parent / "x86_64-w64-mingw32" / "lib", TOOLS.parent / "lib"):
+            for name in ("libucrt.a", "libucrtbase.a", "libmsvcrt.a", "libmingwex.a", "libmingw32.a", "libc++.a", "libunwind.a",
+                         "libkernel32.a", "libuser32.a", "libwinpthread.a", "libpthread.a", "libm.a", "libmoldname.a",
+                         "libapi-ms-win-crt-runtime-l1-1-0.a"):
+                if (folder / name).exists():
+                    libraries.append(str(folder / name))
+        libraries += host.host_libs()
+        for library in libraries:
+            for l in subprocess.run([NM, "--defined-only", library], capture_output=True, text=True).stdout.splitlines():
+                parts = l.split()
+                if len(parts) >= 2 and not l.endswith(":"):
+                    found.add(parts[-1])
     else:
         for library in ("/lib/x86_64-linux-gnu/libc.so.6", "/lib/x86_64-linux-gnu/libm.so.6",
                         "/lib/x86_64-linux-gnu/libstdc++.so.6"):

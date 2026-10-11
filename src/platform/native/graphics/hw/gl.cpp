@@ -3,6 +3,11 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 
 namespace Hw
 {
@@ -10,6 +15,35 @@ namespace
 {
 Gl g_Gl;
 bool g_Loaded = false;
+
+// The hardware renderer asks for its passes' uniforms by name every time it uses them (thousands a frame), and the driver looks
+// each name up again: the answers kept, a thread's (each has its own context) by program and name. The renderer's programs live
+// as long as it does, so an answer never goes stale
+GLint (*g_GetUniformLocation)(GLuint, const GLchar*) = nullptr;
+
+struct NameHash
+{
+    using is_transparent = void;
+    size_t operator()(std::string_view name) const
+    {
+        return std::hash<std::string_view>()(name);
+    }
+};
+
+GLint CachedUniformLocation(GLuint program, const GLchar* name)
+{
+    thread_local std::unordered_map<GLuint, std::unordered_map<std::string, GLint, NameHash, std::equal_to<>>> cache;
+    auto& names = cache[program];
+    auto found = names.find(std::string_view(name));
+    if (found != names.end())
+    {
+        return found->second;
+    }
+
+    GLint location = g_GetUniformLocation(program, name);
+    names.emplace(name, location);
+    return location;
+}
 
 template <typename T>
 bool Load(T& function, const char* name)
@@ -108,6 +142,13 @@ bool LoadGl()
     ok &= Load(g_Gl.FenceSync, "glFenceSync");
     ok &= Load(g_Gl.WaitSync, "glWaitSync");
     ok &= Load(g_Gl.DeleteSync, "glDeleteSync");
+    const char* caching = std::getenv("TWIN_HW_UNIFORM_CACHE");
+    if (ok && (caching == nullptr || caching[0] != '0'))
+    {
+        g_GetUniformLocation = g_Gl.GetUniformLocation;
+        g_Gl.GetUniformLocation = CachedUniformLocation;
+    }
+
     g_Loaded = ok;
     return ok;
 }

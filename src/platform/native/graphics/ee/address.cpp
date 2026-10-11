@@ -13,6 +13,9 @@ namespace
 constexpr u32 WindowShift = 26;
 constexpr std::uintptr_t WindowMask = (std::uintptr_t{1} << WindowShift) - 1;
 constexpr u32 Slots = 64;
+// A slot's window is kept with this bit set: a window's base has it clear (they're 64 MB apart), and an unused slot holds 0, so
+// the first window (addresses below 64 MB: Windows maps the stack and heap there, macOS and Linux never do) is told from no window
+constexpr std::uintptr_t Used = 1;
 
 std::atomic<std::uintptr_t> g_Windows[Slots];
 std::mutex g_Mutex;
@@ -26,7 +29,7 @@ u32 DmaAddress(const void* pointer)
     }
 
     auto host = reinterpret_cast<std::uintptr_t>(pointer);
-    std::uintptr_t window = host & ~WindowMask;
+    std::uintptr_t window = (host & ~WindowMask) | Used;
     for (u32 slot = 1; slot < Slots; slot++)
     {
         std::uintptr_t mapped = g_Windows[slot].load(std::memory_order_acquire);
@@ -70,6 +73,6 @@ u8* HostAddress(u32 address)
         return nullptr;
     }
 
-    return reinterpret_cast<u8*>(window | (address & WindowMask));
+    return reinterpret_cast<u8*>((window & ~Used) | (address & WindowMask));
 }
 }

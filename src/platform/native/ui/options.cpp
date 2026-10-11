@@ -36,7 +36,7 @@ constexpr OptionInfo Infos[OptionCount] = {
     {OptionFastLoading, "fast_loading", 1, 1},
     {OptionPauseOnFocusLoss, "pause_on_focus_loss", 1, 1},
     {OptionWidescreen, "widescreen", 1, 1},
-    {OptionRefresh60, "refresh_60hz", 1, 1},
+    {OptionRefresh60, "refresh_60hz", 1, 4},
     {OptionRetailFixes, "retail_fixes", 0, 1},
     {OptionTextureFilter, "texture_filter", 1, 1},
     {OptionCrtFilter, "crt_filter", 0, 1},
@@ -62,6 +62,7 @@ constexpr OptionInfo Infos[OptionCount] = {
     {OptionMouseLook, "mouse_look", 1, 1},
     {OptionMouseSensitivity, "mouse_sensitivity", 5, 10},
     {OptionInvertMouseY, "invert_mouse_y", 0, 1},
+    {OptionLanguage, "language", 0, 5},
 };
 
 s32 g_Values[OptionCount];

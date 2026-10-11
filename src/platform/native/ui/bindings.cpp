@@ -380,6 +380,32 @@ void KeySticks(s32 x, s32 y, u8* outX, u8* outY)
     }
 }
 
+// A stick's two bytes as the DualShock 2's would be: a gamepad's stick reports a circle (a full diagonal is 0.71 of each axis's
+// throw, some pads' a little less), the DualShock 2's reaches its square's corners, and the game takes its dead zones off each
+// axis and runs past a push it measured on that: a circle's diagonal walked (an Xbox Series pad's; an Xbox One pad's, a little
+// past the circle, ran). The point moved out along its direction to the square: as far as the circle's edge is the square's
+// edge, the axes' own throws unchanged (PCSX2 scales its axes by 1.33 by default for the same reason)
+void Squared(u8* x, u8* y)
+{
+    f32 fx = (static_cast<f32>(*x) - 128.0f) / 127.0f;
+    f32 fy = (static_cast<f32>(*y) - 128.0f) / 127.0f;
+    f32 biggest = std::max(std::fabs(fx), std::fabs(fy));
+    if (biggest <= 0.0f)
+    {
+        return;
+    }
+
+    // (On an axis the stretch is 1: the byte as it was, 0x00 still reached)
+    f32 stretch = std::sqrt(fx * fx + fy * fy) / biggest;
+    if (stretch <= 1.0f)
+    {
+        return;
+    }
+
+    *x = Clamp255(static_cast<int>(std::lround(128.0f + fx * stretch * 127.0f)));
+    *y = Clamp255(static_cast<int>(std::lround(128.0f + fy * stretch * 127.0f)));
+}
+
 // A stick's byte past a dead zone (a fraction of the throw: the throw past it stretched to the whole), and scaled
 u8 Shaped(u8 value, f32 deadZone, f32 scale, bool inverted)
 {
@@ -553,6 +579,8 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
         // The accessibility settings: the sticks' dead zone (on top of the game's own), the camera's speed and inversion
         f32 deadZone = static_cast<f32>(GetOption(OptionStickDeadZone)) * 0.05f;
         f32 cameraScale = static_cast<f32>(GetOption(OptionCameraSpeed)) / 5.0f;
+        Squared(&rawLeftX, &rawLeftY);
+        Squared(&rawRightX, &rawRightY);
         pad->leftX = Shaped(rawLeftX, deadZone, 1.0f, false);
         pad->leftY = Shaped(rawLeftY, deadZone, 1.0f, false);
         pad->rightX = Shaped(rawRightX, deadZone, cameraScale, IsOn(OptionInvertCameraX));

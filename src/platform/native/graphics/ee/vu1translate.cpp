@@ -6,6 +6,7 @@
 
 #include "vu1translate.h"
 
+#include "vif.h"
 #include "vu.h"
 #include "vu1jit.h"
 
@@ -454,6 +455,105 @@ inline u64 Now()
                                 .count());
 }
 
+// Far more than any of the game's programs runs at a time (at most ~20000 instructions, measured with $TWIN_VU_LONGEST): a program
+// past it is in a loop it won't leave.
+// $TWIN_VU_RUNAWAY sets it (0: never stopped)
+u64 RunawayLimit()
+{
+    static const u64 limit = [] {
+        const char* setting = std::getenv("TWIN_VU_RUNAWAY");
+        if (setting == nullptr)
+        {
+            return u64{2000000};
+        }
+
+        u64 value = std::strtoull(setting, nullptr, 10);
+        return value == 0 ? ~u64{0} : value;
+    }();
+    return limit;
+}
+
+void ReportRunaway(Vu& vu, const VuMicroState& st, u32 start)
+{
+    // The first few said, then one in 500 with the count so far
+    static u32 reported = 0;
+    reported++;
+    if (reported > 8 && reported % 500 != 0)
+    {
+        return;
+    }
+
+    // $TWIN_VIF_HISTORY=FOLDER: the first three runaways' VIF1 codes up to the program's start (vif_history_N.txt)
+    if (const char* folder = std::getenv("TWIN_VIF_HISTORY"); folder != nullptr && reported <= 3)
+    {
+        DumpVifHistory((std::string(folder) + "/vif_history_" + std::to_string(reported) + ".txt").c_str());
+    }
+
+    // $TWIN_VU_DUMP=FOLDER: the first runaway's VU as it was (vu_code.bin: micro memory, 8 bytes an instruction; vu_data.bin;
+    // vu_registers.txt), for native/tools/vudecode.py
+    if (const char* folder = std::getenv("TWIN_VU_DUMP"); folder != nullptr && reported == 1)
+    {
+        std::string base = folder;
+        if (FILE* file = std::fopen((base + "/vu_code.bin").c_str(), "wb"))
+        {
+            std::fwrite(vu.code(), 8, vu.codeSize(), file);
+            std::fclose(file);
+        }
+
+        if (FILE* file = std::fopen((base + "/vu_data.bin").c_str(), "wb"))
+        {
+            std::fwrite(vu.data(), 1, vu.dataSize(), file);
+            std::fclose(file);
+        }
+
+        if (FILE* file = std::fopen((base + "/vu_registers.txt").c_str(), "w"))
+        {
+            std::fprintf(file, "start %#x pc %#x top %#x itop %#x\n", start, st.pc, vu.top, vu.itop);
+            for (u32 i = 0; i < 16; i++)
+            {
+                std::fprintf(file, "vi%u %#x\n", i, vu.vi[i]);
+            }
+
+            for (u32 i = 0; i < 32; i++)
+            {
+                std::fprintf(file, "vf%u %08x %08x %08x %08x\n", i, vu.vf[i].u[0], vu.vf[i].u[1], vu.vf[i].u[2], vu.vf[i].u[3]);
+            }
+
+            std::fclose(file);
+        }
+    }
+
+    std::fprintf(stderr, "[native] vu: a program started at %#x still running at pc %#x after %llu instructions: stopped (%u so far) "
+                 "(vi %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x)\n", start, st.pc,
+                 static_cast<unsigned long long>(RunawayLimit()), reported, vu.vi[0], vu.vi[1], vu.vi[2], vu.vi[3], vu.vi[4],
+                 vu.vi[5], vu.vi[6], vu.vi[7], vu.vi[8], vu.vi[9], vu.vi[10], vu.vi[11], vu.vi[12], vu.vi[13], vu.vi[14],
+                 vu.vi[15]);
+}
+
+// $TWIN_VU_TRACE_RUNAWAY: the first runaway's next instructions interpreted one by one, each pc and the integer registers it
+// left, to see the loop
+void TraceRunaway(Vu& vu, VuMicroState& st)
+{
+    static bool traced = false;
+    if (traced || std::getenv("TWIN_VU_TRACE_RUNAWAY") == nullptr)
+    {
+        return;
+    }
+
+    traced = true;
+    static const u32 steps = std::getenv("TWIN_VU_TRACE_STEPS") != nullptr ? static_cast<u32>(std::atoi(std::getenv("TWIN_VU_TRACE_STEPS"))) : 400;
+    for (u32 step = 0; step < steps; step++)
+    {
+        std::fprintf(stderr, "vu trace: pc %03x vi %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x\n", st.pc, vu.vi[1], vu.vi[2],
+                     vu.vi[3], vu.vi[4], vu.vi[5], vu.vi[6], vu.vi[7], vu.vi[8], vu.vi[9], vu.vi[10], vu.vi[11], vu.vi[12],
+                     vu.vi[13], vu.vi[14], vu.vi[15]);
+        if (!vu.StepMicro(st))
+        {
+            break;
+        }
+    }
+}
+
 // A program run with the translations
 template <bool Profile>
 void RunTranslated(Vu& vu, Dispatcher& dispatcher, u32 start)
@@ -463,6 +563,10 @@ void RunTranslated(Vu& vu, Dispatcher& dispatcher, u32 start)
     VuMicroState st;
     Slots slots;
     vu.BeginMicro(st, start);
+    // A program running on and on (a loop whose count came from data it shouldn't have): stopped, said once a start. The PS2's
+    // VU would have hung the frame; the game would freeze here, so the frame is left without the rest of its work instead
+    const u64 began = vu.executed;
+    auto runaway = [&]() { return vu.executed - began >= RunawayLimit(); };
     u64 t = Profile ? Now() : 0;
     auto lap = [&](u64& into) {
         if constexpr (Profile)
@@ -493,8 +597,18 @@ void RunTranslated(Vu& vu, Dispatcher& dispatcher, u32 start)
                 lap(g_Times.code);
                 StatsOf(vu).translatedInstructions += vu.executed - executed;
                 StatsOf(vu).entries++;
-                bool next = !ended && dispatcher.Next(vu, st, slots, target);
+                bool stopped = !ended && runaway();
+                bool next = !ended && !stopped && dispatcher.Next(vu, st, slots, target);
                 lap(g_Times.next);
+                if (stopped)
+                {
+                    LeaveTranslation(vu, st, slots, dispatcher.SignatureAt(slots.exitSignature));
+                    ReportRunaway(vu, st, start);
+                    TraceRunaway(vu, st);
+                    ended = true;
+                    break;
+                }
+
                 if (!next)
                 {
                     LeaveTranslation(vu, st, slots, dispatcher.SignatureAt(slots.exitSignature));
@@ -529,11 +643,31 @@ void RunTranslated(Vu& vu, Dispatcher& dispatcher, u32 start)
         {
             break;
         }
+
+        if (runaway())
+        {
+            ReportRunaway(vu, st, start);
+            TraceRunaway(vu, st);
+            break;
+        }
     }
 
     vu.EndMicro(st);
     lap(g_Times.leave);
     std::fesetround(previousRounding);
+    // $TWIN_VU_LONGEST: the most instructions a program ran to its end, said whenever it grows (for the runaway limit)
+    static const bool longest = std::getenv("TWIN_VU_LONGEST") != nullptr;
+    if (longest)
+    {
+        static u64 most = 0;
+        u64 ran = vu.executed - began;
+        if (ran > most && ran < RunawayLimit())
+        {
+            most = ran;
+            std::fprintf(stderr, "[native] vu: longest program run %llu instructions (started at %#x)\n",
+                         static_cast<unsigned long long>(most), start);
+        }
+    }
 }
 
 void RunTranslated(Vu& vu, Dispatcher& dispatcher, u32 start)

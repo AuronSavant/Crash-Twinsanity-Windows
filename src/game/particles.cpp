@@ -19,6 +19,10 @@
 #include "platform/graphics.h"
 #include "platform/math.h"
 
+#ifdef TWIN_NATIVE
+#include "ui/nativeui.h"
+#endif
+
 namespace
 {
 // The versions the systems' and emitters' fields came in (older files get their defaults), and the legacy version, whose files
@@ -3383,24 +3387,34 @@ extern "C"
                 else
                 {
                     g_ParticleTime = g_ParticleTime + delta;
-                    g_ParticleFrameCounter++;
-                    UpdateParticleCollisionSpheres();
-                    EmitterRuntime* runtime = g_ParticleEmitterWheel[g_ParticleEmitterWheelIndex];
-                    while (runtime != nullptr)
+                    // The emitters' and events' wheels turn a 60th of a second a frame: past 60 frames a second, once for each
+                    // 60th gone by (the particles' places are by the time, every frame)
+                    u32 ticks = 1;
+#ifdef TWIN_NATIVE
+                    static f32 carried = 0.0f;
+                    ticks = NativeUi::GameTicks(delta, &carried);
+#endif
+                    for (u32 tick = 0; tick < ticks; tick++)
                     {
-                        EmitterRuntime* next = runtime->next;
-                        if (runtime->maxParticles != runtime->capacity)
+                        g_ParticleFrameCounter++;
+                        UpdateParticleCollisionSpheres();
+                        EmitterRuntime* runtime = g_ParticleEmitterWheel[g_ParticleEmitterWheelIndex];
+                        while (runtime != nullptr)
                         {
-                            AllocParticleEmitterBlocks(runtime);
+                            EmitterRuntime* next = runtime->next;
+                            if (runtime->maxParticles != runtime->capacity)
+                            {
+                                AllocParticleEmitterBlocks(runtime);
+                            }
+
+                            runtime = next;
                         }
 
-                        runtime = next;
+                        active = GenerateParticles(&views);
+                        UpdateParticleEmitterTiming();
+                        RescheduleParticleEmitters();
+                        ProcessParticleBlockEvents();
                     }
-
-                    active = GenerateParticles(&views);
-                    UpdateParticleEmitterTiming();
-                    RescheduleParticleEmitters();
-                    ProcessParticleBlockEvents();
                 }
             }
 

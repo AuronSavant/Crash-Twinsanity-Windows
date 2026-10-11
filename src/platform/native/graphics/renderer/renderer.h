@@ -1185,8 +1185,8 @@ extern "C"
     void End2D(u8* end) RETAIL(FUN_001a6920);
     // A vertex's colour (RGBA bytes), position (XYZ2, XYZ3 that doesn't draw) and texture coordinates
     u8* Write2DColour(u8* packet, u32 colour) RETAIL(FUN_001ab548);
-    u8* Write2DVertex(u8* packet, f32 x, f32 y, u32 z, u32 withoutKick) RETAIL(FUN_001ab5b8);
-    u8* Write2DTexCoord(u8* packet, f32 s, f32 t) RETAIL(FUN_001ab628);
+    u8* Write2DVertex(u8* packet, f32 x, f32 y, u32 z, u32 withoutKick) RETAIL_N32(FUN_001ab5b8);
+    u8* Write2DTexCoord(u8* packet, f32 s, f32 t) RETAIL_N32(FUN_001ab628);
     // The material listed among the frame's and its writer started, with one tag or two
     void StartMaterialWriter(Material* material) RETAIL(FUN_001c0920);
     void StartMaterialWriterTwoTags(Material* material) RETAIL(FUN_001c0980);

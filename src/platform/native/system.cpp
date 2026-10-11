@@ -3,6 +3,7 @@
 #include "graphics/renderthread.h"
 #include "graphics/window.h"
 #include "native.h"
+#include "ui/nativeui.h"
 #include "platform/io.h"
 #include "platform/memory.h"
 #include "platform/sound.h"
@@ -117,10 +118,20 @@ void Native::ParseArguments(int& argc, char** argv)
 // dialog the first time it's launched without one
 std::string Native::SettingsFolder()
 {
+#if defined(_WIN32)
+    // Windows: %APPDATA%\Crash Twinsanity (the roaming settings, as SDL_GetPrefPath has them), forward slashes like the rest
+    const char* appData = std::getenv("APPDATA");
+    std::string folder = std::string(appData != nullptr ? appData : ".") + "/Crash Twinsanity";
+    for (char& c : folder)
+    {
+        c = c == '\\' ? '/' : c;
+    }
+    return folder;
+#elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
-#if defined(__APPLE__)
     return std::string(home != nullptr ? home : ".") + "/Library/Application Support/Crash Twinsanity";
 #else
+    const char* home = std::getenv("HOME");
     const char* config = std::getenv("XDG_CONFIG_HOME");
     return config != nullptr ? std::string(config) + "/crash-twinsanity"
                              : std::string(home != nullptr ? home : ".") + "/.config/crash-twinsanity";
@@ -159,11 +170,38 @@ std::string Native::PickDiscImage()
 
     if (!pick.path.empty())
     {
-        std::filesystem::create_directories(SettingsFolder());
+        std::error_code ignored;
+        std::filesystem::create_directories(SettingsFolder(), ignored);
         std::ofstream(SettingsFolder() + "/disc_image.txt") << pick.path << '\n';
     }
 
     return pick.path;
+}
+
+void Native::LocalTime(std::time_t seconds, std::tm* local)
+{
+#if defined(_WIN32)
+    localtime_s(local, &seconds);
+#else
+    localtime_r(&seconds, local);
+#endif
+}
+
+void Native::SetEnvironment(const char* name, const char* value)
+{
+#if defined(_WIN32)
+    // An empty value removes the variable
+    _putenv_s(name, value != nullptr ? value : "");
+#else
+    if (value != nullptr)
+    {
+        setenv(name, value, 1);
+    }
+    else
+    {
+        unsetenv(name);
+    }
+#endif
 }
 
 void Native::Log(const char* format, ...)
@@ -254,6 +292,23 @@ void Platform::System::Exit(s32 status)
 // OSD setting, which the game goes by the same way)
 Platform::System::ConsoleLanguage Platform::System::Language()
 {
+    // The options' language when one's chosen (Options > Gameplay > language)
+    switch (NativeUi::GetOption(NativeUi::OptionLanguage))
+    {
+    case 1:
+        return LanguageEnglish;
+    case 2:
+        return LanguageFrench;
+    case 3:
+        return LanguageGerman;
+    case 4:
+        return LanguageItalian;
+    case 5:
+        return LanguageSpanish;
+    default:
+        break;
+    }
+
     int count = 0;
     SDL_Locale** locales = SDL_GetPreferredLocales(&count);
     ConsoleLanguage language = LanguageEnglish;
@@ -283,7 +338,7 @@ Platform::System::DateTime Platform::System::LocalTime()
 {
     std::time_t now = std::time(nullptr);
     std::tm local{};
-    localtime_r(&now, &local);
+    Native::LocalTime(now, &local);
     return {static_cast<u16>(local.tm_year + 1900), static_cast<u8>(local.tm_mon + 1), static_cast<u8>(local.tm_mday),
             static_cast<u8>(local.tm_hour),       static_cast<u8>(local.tm_min),     static_cast<u8>(local.tm_sec)};
 }
@@ -324,8 +379,13 @@ void Platform::Memory::WriteBackCache()
 // quadwords. The game's own heap manager (game/memory.cpp) works inside what AllocatePool gives it, as on the PS2
 void* RetailLibc::Malloc(u32 size)
 {
+#if defined(_WIN32)
+    // The C runtime's malloc is 16 byte aligned on 64 bit Windows, and std::free frees it (posix_memalign isn't there)
+    return std::malloc(size != 0 ? size : 16);
+#else
     void* memory = nullptr;
     return posix_memalign(&memory, 16, size != 0 ? size : 16) == 0 ? memory : nullptr;
+#endif
 }
 
 void RetailLibc::Free(void* memory)

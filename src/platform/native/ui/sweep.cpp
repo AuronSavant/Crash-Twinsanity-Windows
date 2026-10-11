@@ -75,8 +75,26 @@ bool SweepActive()
     return !g_Level.empty();
 }
 
-void SweepFrame()
+void SweepFrame(bool fromPads)
 {
+    // $TWIN_START_CHUNK=Levels\Earth\Hub\bossarea: the game started in that chunk as the sweep starts it, then played by hand
+    static const char* startChunk = std::getenv("TWIN_START_CHUNK");
+    static bool started = false;
+    if (startChunk != nullptr && !started && G_GameController != nullptr)
+    {
+        GameController* controller = G_GameController;
+        u32 state = controller->State();
+        if (state == GameController::StateVivendiLogo || state == GameController::StateTravellersTalesLogo)
+        {
+            started = true;
+            StringAssign(&controller->progress.startChunk, startChunk);
+            controller->states.entry = EntrySaved;
+            controller->saveController.Take(&controller->progress, controller->chunkManager, nullptr);
+            controller->SetNextState(GameController::StateLoadingLevel);
+            Native::Log("start: loading %s", startChunk);
+        }
+    }
+
     if (!SweepActive())
     {
         return;
@@ -88,10 +106,20 @@ void SweepFrame()
         return;
     }
 
+    // Called from the game controller's update and the pads' read (pads.cpp), both every frame while the game plays: the time
+    // is what passed since either's last call, the frames the game controller's
     Clock::time_point now = Clock::now();
     f32 delta = std::chrono::duration<f32>(now - g_LastFrame).count();
     g_LastFrame = now;
     u32 state = controller->State();
+    static f32 lastTick = 0.0f;
+    f32 sinceStart = std::chrono::duration<f32>(now - g_Start).count();
+    if (std::getenv("TWIN_SWEEP_TRACE") != nullptr && sinceStart - lastTick > 5.0f)
+    {
+        lastTick = sinceStart;
+        Native::Log("sweep: tick at %.1f s: state %u, next %u, played %.1f s, %u frames", sinceStart, state,
+                    controller->NextState(), g_Played, g_Frames);
+    }
     if (state != g_LastState)
     {
         Native::Log("sweep: state %u at %.1f s", state, std::chrono::duration<f32>(now - g_Start).count());
@@ -137,13 +165,48 @@ void SweepFrame()
             g_PlayStart = now;
         }
 
-        g_Frames++;
+        if (!fromPads)
+        {
+            g_Frames++;
+        }
+
         g_Played += std::min(delta, 0.25f);
         controller->hudDelay = 0;
+        // $TWIN_SWEEP_PICTURES=FIRST: every picture OLEG reads from a file from the FIRSTth (the levels' titles, then the screens'
+        // tiles but the gallery's named two), one each 20 frames from 3 s in, read at once
+        static const char* pictures = std::getenv("TWIN_SWEEP_PICTURES");
+        static u32 nextPicture = pictures != nullptr ? static_cast<u32>(std::atoi(pictures)) : 0;
+        if (pictures && !fromPads && g_Played > 3.0f && g_Frames % 20 == 0)
+        {
+            const u32 titles = OLEG::NoLevelTitle;
+            u32 picture = nextPicture < titles ? OLEG::PictureLevelTitle : OLEG::PictureTiles;
+            u32 wanted = nextPicture < titles ? nextPicture : nextPicture - titles;
+            if (picture == OLEG::PictureTiles && (wanted == OLEG::TilesNamed || wanted == OLEG::TilesNamed + 1))
+            {
+                wanted = OLEG::TilesCredits;
+                nextPicture = titles + OLEG::TilesCredits;
+            }
+
+            if (picture == OLEG::PictureTiles && wanted >= OLEG::TilesNone)
+            {
+                Finish(0, "pictures read");
+            }
+
+            Native::Log("sweep: picture %u %u", picture, wanted);
+            controller->oleg.pictures[picture].wanted = wanted;
+            controller->oleg.LoadPicture(picture, 1);
+            nextPicture++;
+        }
+
         if (g_Played >= g_Seconds)
         {
             Finish(0, "ran");
         }
+    }
+    else if (state == GameController::StateGameOver)
+    {
+        // The scripted input lost every life (the game's own game over screen, waiting for a choice): played as far as it goes
+        Finish(0, "game over");
     }
     else if (state == GameController::StatePaused)
     {
@@ -161,14 +224,27 @@ void SweepFrame()
 
 void SweepInput(BoundPad* pad)
 {
-    if (!SweepActive() || !g_Playing)
+    // $TWIN_AUTOPLAY: the same input in any play (a saved game loaded by $TWIN_SAVE_TEST=load, say), from when play starts
+    static const bool autoplay = std::getenv("TWIN_AUTOPLAY") != nullptr;
+    f32 t = g_Played;
+    if (autoplay && !SweepActive())
+    {
+        GameController* controller = G_GameController;
+        if (controller == nullptr || controller->State() != GameController::StatePlaying)
+        {
+            return;
+        }
+
+        static const Clock::time_point began = Clock::now();
+        t = std::chrono::duration<f32>(Clock::now() - began).count();
+    }
+    else if (!SweepActive() || !g_Playing)
     {
         return;
     }
 
     // A 4 s cycle: the stick pushed in a direction that turns 100 degrees a cycle, cross held for the first second (a jump, and
     // the cutscenes' skip), square tapped at 2.5 s
-    f32 t = g_Played;
     s32 cycle = static_cast<s32>(t / 4.0f);
     f32 inCycle = t - static_cast<f32>(cycle) * 4.0f;
     f32 angle = static_cast<f32>(cycle) * 1.745f;

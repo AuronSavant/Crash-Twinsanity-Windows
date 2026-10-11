@@ -7,6 +7,9 @@
 #ifdef TWIN_NATIVE
 // A free of memory that isn't the game's (src/platform/native/lowmemory.cpp)
 void NativeBadFree(void* memory, const void* pages, const void* pagesEnd);
+// $TWIN_DEBUG_HEAP: a small allocation freed twice or not at an entry's start, said with where it came from
+bool NativeDebugHeap();
+void NativeHeapProblem(const char* what, void* memory);
 #endif
 
 namespace
@@ -391,6 +394,25 @@ extern "C"
 #endif
         u32 page = static_cast<u32>(Bytes(memory) - small->pages) / PageSize;
         FixedAllocatorNode* node = small->nodes + page;
+#ifdef TWIN_NATIVE
+        if (NativeDebugHeap())
+        {
+            if ((static_cast<u32>(Bytes(memory) - Bytes(node->allocator.memory)) % node->allocator.entrySize) != 0)
+            {
+                NativeHeapProblem("a small free not at an entry's start", memory);
+            }
+
+            void* free = node->allocator.nextFree;
+            for (u32 i = 0; i < node->allocator.freeCount && free != nullptr; i++, free = *static_cast<void**>(free))
+            {
+                if (free == memory)
+                {
+                    NativeHeapProblem("a small allocation freed twice", memory);
+                    return;
+                }
+            }
+        }
+#endif
         FreeEntry(node, memory);
         void** sizeClass = reinterpret_cast<void**>(&small->sizeClasses[small->pageSizeClasses[page]]);
         if (node->allocator.capacity == node->allocator.freeCount)
@@ -679,6 +701,14 @@ extern "C"
 
     void FreeMemory(HeapManager* heap, void* memory)
     {
+#ifdef TWIN_NATIVE
+        if (NativeDebugHeap() && memory != nullptr &&
+            (Bytes(memory) < heap->poolStart ||
+             Bytes(memory) >= heap->small.pages + static_cast<uiptr>(heap->small.pageCount) * PageSize))
+        {
+            NativeHeapProblem("a free outside the game's pool", memory);
+        }
+#endif
         if (Bytes(memory) < heap->small.start)
         {
             FreeHeap(heap, memory);

@@ -133,10 +133,13 @@ struct BoundPad
 };
 
 void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad);
+// A gamepad stick's bytes (its circle) moved out to the DualShock 2's square (bindings.cpp)
+void Squared(u8* x, u8* y);
 // The level sweep (sweep.cpp, $TWIN_SWEEP_LEVEL): whether it runs, its frame (the warp, the time played, the exit) and its scripted
 // input over the pad's
 bool SweepActive();
-void SweepFrame();
+// fromPads: the pads' read's call (time only; the game controller's counts the frames)
+void SweepFrame(bool fromPads = false);
 void SweepInput(BoundPad* pad);
 // The save and load test (savetest.cpp, $TWIN_SAVE_TEST=save|load): whether it runs, its frame, its menu step (a wanted item
 // selected: true) and its input

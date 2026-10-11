@@ -289,6 +289,23 @@ struct BatchKey
     u32 nativeDepthTest;
 };
 
+// Every primitive builds a key (zeroed, so its padding compares too) and compares it with the batch's: done inline, a word at a
+// time (the C library's memset, memcmp and memcpy calls cost more than the work on Windows' runtime)
+static_assert(sizeof(BatchKey) % sizeof(u64) == 0, "BatchKey compared a word at a time");
+
+inline bool SameBatchKey(const BatchKey& a, const BatchKey& b)
+{
+    const u64* x = reinterpret_cast<const u64*>(&a);
+    const u64* y = reinterpret_cast<const u64*>(&b);
+    u64 difference = 0;
+    for (size_t i = 0; i < sizeof(BatchKey) / sizeof(u64); i++)
+    {
+        difference |= x[i] ^ y[i];
+    }
+
+    return difference == 0;
+}
+
 // The shader's features (its variant's bits)
 enum ProgramBits : u32
 {
@@ -1074,6 +1091,9 @@ struct GpuTexture
     // Every tile decoded, checked good at this epoch
     bool complete = false;
     u32 checkedEpoch = 0;
+    // Its oldest tile's decode, when it's complete: no page of it changed since then (and none a target's newer), every tile
+    // is still good
+    u32 oldestTile = 0;
     // A replacement (a pack's texture) looked for when the texture was last decoded whole from the CPU's data; 0: none
     GLuint replacement = 0;
     // The texture drawn with (its own, its replacement, or a decode of the same content made for another place)
@@ -1145,6 +1165,11 @@ public:
 
     bool Init();
     bool Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count) override;
+    // A primitive drawn as the one before it was (its state, targets and texture as they were: HwGs::DrawLikeLast), and the
+    // end of every primitive's drawing (its batch, its vertexes, the pages it draws)
+    bool DrawLikeLast(const Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count, Rect rect);
+    void AddPrimitive(const Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, const Rect& rect, Target* colour, Target* depth,
+                      s32 n, bool shaderBlend, const Gs::PageSet& drawnPages, const Gs::PageSet& depthPages);
     void BeforeCpuRead(const Gs::PageSet& pages) override;
     void BeforeCpuWrite(const Gs::PageSet& pages) override { BeforeCpuRead(pages); }
     void Flush() override;
@@ -1219,6 +1244,25 @@ private:
     std::map<std::tuple<u32, u32>, std::pair<GLuint, GLuint>> copies_;
     BatchKey key_ = {};
     bool batching_ = false;
+    // The last primitive drawn the whole way, for the next to be drawn the same way while nothing it depended on has changed:
+    // the GS's state (its registers' generation, the CLUT), the targets (their list's changes), the settings, and the texture
+    // DecodeOnGpu found (good as it was). Its key is the batch's (key_)
+    struct LastDraw
+    {
+        bool valid = false;
+        u64 generation = 0;
+        u32 clut = 0;
+        u64 targetsVersion = 0;
+        int filterMode = 0;
+        int ditherMode = 0;
+        Target* colour = nullptr;
+        Target* depth = nullptr;
+        const GpuTexture* texture = nullptr;
+        GLuint textureId = 0;
+        bool shaderBlend = false;
+    } last_;
+    // Counts the targets made and destroyed
+    u64 targetsVersion_ = 0;
     std::vector<HwVertex> vertexes_;
     // A batch blended by the shader: its primitives' rectangles (one overlapping an earlier one starts a new batch, as the
     // destination copy is from before the batch)
@@ -1254,6 +1298,12 @@ private:
     void InitMemory();
     // Textures decoded on the GPU, the decode's program and framebuffer, the CLUT as a texture
     std::unordered_map<GpuTextureKey, GpuTexture, GpuTextureKeyHash> gpuTextures_;
+    // The previous draw's texture: its key, and the GS state's generation and CLUT it was found for (the same again: nothing to
+    // make or look up)
+    GpuTextureKey lastTextureKey_ = {};
+    GpuTexture* lastTexture_ = nullptr;
+    u64 lastTextureGeneration_ = 0;
+    u32 lastTextureClut_ = 0;
     GLuint decodeProgram_ = 0;
     GLuint decodeFbo_ = 0;
     // TWIN_HW_STATS: the render passes begun (a draw into another framebuffer or attachment than the last), by cause
@@ -1641,6 +1691,7 @@ Target* HwGs::TargetFor(u32 bp, u32 bw, u32 psm, u32 height, bool frame)
     }
 
     targets_.push_back(std::move(made));
+    targetsVersion_++;
     return targets_.back().get();
 }
 
@@ -1729,6 +1780,7 @@ void HwGs::DestroyTarget(Target* target)
     gl.DeleteTextures(1, &target->texture);
     targets_.erase(std::remove_if(targets_.begin(), targets_.end(), [&](const auto& t) { return t.get() == target; }),
                    targets_.end());
+    targetsVersion_++;
 }
 
 GLuint HwGs::FramebufferFor(Target* colour, Target* depth)
@@ -1763,11 +1815,19 @@ void HwGs::RectPages(const Target* target, const Rect& rect, Gs::PageSet& pages)
         s32 pageHeight = 0;
         PageSize(target->psm, &pageWidth, &pageHeight);
         u32 base = target->bp / 32;
-        for (s32 row = rect.top / pageHeight; row <= rect.bottom / pageHeight; row++)
+        // The bounds worked out once (the compiler can't: the page set might be the rectangle as far as it knows), every
+        // primitive asks this
+        const s32 firstRow = rect.top / pageHeight;
+        const s32 lastRow = rect.bottom / pageHeight;
+        const s32 firstColumn = rect.left / pageWidth;
+        const s32 lastColumn = rect.right / pageWidth;
+        const u32 bw = target->bw;
+        for (s32 row = firstRow; row <= lastRow; row++)
         {
-            for (s32 column = rect.left / pageWidth; column <= rect.right / pageWidth; column++)
+            const u32 rowBase = base + static_cast<u32>(row) * bw;
+            for (s32 column = firstColumn; column <= lastColumn; column++)
             {
-                pages.set((base + static_cast<u32>(row) * target->bw + static_cast<u32>(column)) & (Gs::PageCount - 1));
+                pages.set((rowBase + static_cast<u32>(column)) & (Gs::PageCount - 1));
             }
         }
 
@@ -1964,48 +2024,59 @@ GLuint HwGs::DecodeOnGpu(const Gs::Gs::DrawState& state, s32 left, s32 top, s32 
 {
     const Gs::RegTex0& tex0 = state.context->tex0;
     const Gs::TextureLevel& base = state.levels[0];
-    const bool indexed = base.psm == Gs::PSMT8 || base.psm == Gs::PSMT4 || base.psm == Gs::PSMT8H || base.psm == Gs::PSMT4HL ||
-                         base.psm == Gs::PSMT4HH;
-    GpuTextureKey key = {};
-    key.psm = base.psm;
-    key.cpsm = indexed ? static_cast<u32>(tex0.cpsm) : 0;
-    key.csa = indexed ? static_cast<u32>(tex0.csa) : 0;
-    key.clutVersion = indexed ? gs_.clutVersion() : 0;
-    key.texa = gs_.texa().value & 0x000000FF000080FFull;
-    key.levels = state.levelCount;
-    for (u32 i = 0; i < state.levelCount; i++)
-    {
-        key.bp[i] = state.levels[i].bp;
-        key.bw[i] = state.levels[i].bw;
-    }
-
-    key.width = base.width;
-    key.height = base.height;
-    // The previous draw's texture again: nothing to look up
-    static GpuTextureKey lastKey = {};
-    static GpuTexture* lastEntry = nullptr;
     GpuTexture* entry = nullptr;
-    if (lastEntry != nullptr && lastKey == key)
+    static const bool noGenerationCheck = std::getenv("TWIN_HW_NO_TEXTURE_GENERATION") != nullptr;
+    if (!noGenerationCheck && lastTexture_ != nullptr && lastTextureGeneration_ == gs_.stateGeneration() &&
+        lastTextureClut_ == gs_.clutVersion())
     {
-        entry = lastEntry;
+        // No register written since the previous draw (its texture's, TEXA's) and the same CLUT: the same texture
+        entry = lastTexture_;
     }
     else
     {
-        if (gpuTextures_.size() > 4096)
+        const bool indexed = base.psm == Gs::PSMT8 || base.psm == Gs::PSMT4 || base.psm == Gs::PSMT8H || base.psm == Gs::PSMT4HL ||
+                             base.psm == Gs::PSMT4HH;
+        GpuTextureKey key = {};
+        key.psm = base.psm;
+        key.cpsm = indexed ? static_cast<u32>(tex0.cpsm) : 0;
+        key.csa = indexed ? static_cast<u32>(tex0.csa) : 0;
+        key.clutVersion = indexed ? gs_.clutVersion() : 0;
+        key.texa = gs_.texa().value & 0x000000FF000080FFull;
+        key.levels = state.levelCount;
+        for (u32 i = 0; i < state.levelCount; i++)
         {
-            Flush();
-            Gl& gl = GetGl();
-            for (auto& e : gpuTextures_)
-            {
-                gl.DeleteTextures(1, &e.second.id);
-            }
-
-            gpuTextures_.clear();
+            key.bp[i] = state.levels[i].bp;
+            key.bw[i] = state.levels[i].bw;
         }
 
-        entry = &gpuTextures_[key];
-        lastKey = key;
-        lastEntry = entry;
+        key.width = base.width;
+        key.height = base.height;
+        // The previous draw's texture again: nothing to look up
+        if (lastTexture_ != nullptr && lastTextureKey_ == key)
+        {
+            entry = lastTexture_;
+        }
+        else
+        {
+            if (gpuTextures_.size() > 4096)
+            {
+                Flush();
+                Gl& gl = GetGl();
+                for (auto& e : gpuTextures_)
+                {
+                    gl.DeleteTextures(1, &e.second.id);
+                }
+
+                gpuTextures_.clear();
+            }
+
+            entry = &gpuTextures_[key];
+            lastTextureKey_ = key;
+            lastTexture_ = entry;
+        }
+
+        lastTextureGeneration_ = gs_.stateGeneration();
+        lastTextureClut_ = gs_.clutVersion();
     }
 
     Gl& gl = GetGl();
@@ -2088,6 +2159,35 @@ GLuint HwGs::DecodeOnGpu(const Gs::Gs::DrawState& state, s32 left, s32 top, s32 
                         : Rect{left, top, right, bottom};
     }
 
+    // Complete, and no page of it changed since its oldest tile was decoded: nothing stale, as the tiles' search would find
+    // (a page at a time rather than a tile at a time; not when the content cache would take it)
+    static const bool contentCache = std::getenv("TWIN_HW_CONTENT_CACHE") == nullptr || std::getenv("TWIN_HW_CONTENT_CACHE")[0] != '0';
+    static const bool noPageCheck = std::getenv("TWIN_HW_NO_PAGE_CHECK") != nullptr;
+    if (!noPageCheck && t.complete && t.oldestTile != 0 && t.shown != 0 &&
+        !(contentCache && whole && (t.pages & (cpuStale_ | newestMask_)).none()))
+    {
+        bool good = true;
+        for (u16 page : t.pageList)
+        {
+            if (pageEpoch_[page] >= t.oldestTile || newestMask_.test(page))
+            {
+                good = false;
+                break;
+            }
+        }
+
+        if (good)
+        {
+            if (whole)
+            {
+                t.checkedEpoch = epoch_;
+            }
+
+            t.shown = t.replacement != 0 && ReplacementsEnabled() ? t.replacement : t.id;
+            return t.shown;
+        }
+    }
+
     // Stale tiles, their pages
     Gs::PageSet needed;
     bool anyStale = false;
@@ -2135,7 +2235,6 @@ GLuint HwGs::DecodeOnGpu(const Gs::Gs::DrawState& state, s32 left, s32 top, s32 
 
     // Data the CPU wrote: decoded once for its content, wherever and whenever it's uploaded again
     // ($TWIN_HW_CONTENT_CACHE=0 turns it off)
-    static const bool contentCache = std::getenv("TWIN_HW_CONTENT_CACHE") == nullptr || std::getenv("TWIN_HW_CONTENT_CACHE")[0] != '0';
     if (contentCache && whole && (t.pages & (cpuStale_ | newestMask_)).none())
     {
         const u64 hash = ContentHash(state);
@@ -2264,6 +2363,7 @@ GLuint HwGs::DecodeOnGpu(const Gs::Gs::DrawState& state, s32 left, s32 top, s32 
     if (whole)
     {
         t.complete = true;
+        t.oldestTile = ~0u;
         for (u32 i = 0; i < t.levelCount && t.complete; i++)
         {
             for (u32 e : t.levels[i].tileEpoch)
@@ -2273,7 +2373,14 @@ GLuint HwGs::DecodeOnGpu(const Gs::Gs::DrawState& state, s32 left, s32 top, s32 
                     t.complete = false;
                     break;
                 }
+
+                t.oldestTile = std::min(t.oldestTile, e);
             }
+        }
+
+        if (!t.complete)
+        {
+            t.oldestTile = 0;
         }
 
         t.checkedEpoch = epoch_;
@@ -3577,6 +3684,17 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
         return true;
     }
 
+    // A mesh's next triangle: drawn as the last was
+    if (DrawLikeLast(state, vertexes, count, rect))
+    {
+        return true;
+    }
+
+    // Else made the whole way (and the next drawn the same way if this one can be: not a glyph, a texture from a target or the
+    // CPU's decode, or one read from upscaled pages)
+    last_.valid = false;
+    bool repeatable = true;
+
     // What the GPU can't draw exactly is the software GS's
     const bool depthUsed = state.ztst != Gs::ZtstAlways || state.zWritten;
     const u32 frameClass = FrameClassOf(state.fpsm);
@@ -3598,7 +3716,7 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
     }
 
     BatchKey key;
-    std::memset(&key, 0, sizeof(key));
+    __builtin_memset_inline(&key, 0, sizeof(key));
 
     // The frame mask: whole channels by GL's colour mask; part of a channel by the shader on a copy of the destination
     // (a 16 bit frame's channels are its 5 bits and its alpha bit)
@@ -3740,6 +3858,7 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
     Gs::Vertex glyphed[3];
     if (state.textured && state.uv && state.type == Gs::PrimSprite)
     {
+        repeatable = false;
         std::copy(vertexes, vertexes + count, glyphed);
         if (gs_.GlyphForBackend(state, glyphed, count))
         {
@@ -3854,6 +3973,7 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
 
         if (source != nullptr)
         {
+            repeatable = false;
             Gs::PageSet pages;
             RectPages(source, Rect{left, top, std::min(right, static_cast<s32>(source->width) - 1),
                                    std::min(bottom, static_cast<s32>(source->height) - 1)}, pages);
@@ -3893,6 +4013,22 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
             Gs::PageSet texturePages;
             Gs::PagesOfRect(level.psm, level.bp, level.bw, left, top, right, bottom, texturePages);
             textureFromScaled = (texturePages & scaledPages_).any();
+            // Repeated while it's the texture DecodeOnGpu has at once, as long as no target can be its source (whatever the
+            // next primitive's region) and no page of it is upscaled
+            bool sourceless = true;
+            if (!state.mipmapped && sourceClass != ClassNone && !IsDepthClass(sourceClass))
+            {
+                for (auto& known : targets_)
+                {
+                    if (known->bp == level.bp && known->bw == level.bw && known->cls == sourceClass)
+                    {
+                        sourceless = false;
+                        break;
+                    }
+                }
+            }
+
+            repeatable = repeatable && sourceless && !textureFromScaled;
             if (g_FilterMode >= 1)
             {
                 key.magFilter = GL_LINEAR;
@@ -3902,6 +4038,7 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
         }
         else
         {
+            repeatable = false;
             // Decoded by the software GS from local memory (made current for the pages it reads)
             if (level.cacheId == nullptr)
             {
@@ -4249,21 +4386,11 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
     key.primitive = state.type == Gs::PrimPoint ? GL_POINTS
                     : (state.type == Gs::PrimLine || state.type == Gs::PrimLineStrip) ? GL_LINES
                                                                                        : GL_TRIANGLES;
-    if (batching_ && std::memcmp(&key, &key_, sizeof(key)) != 0)
+    // The batch's key kept when it's the same (most primitives: a mesh's run): copied only when it changes
+    const bool sameKey = batching_ && SameBatchKey(key, key_);
+    if (batching_ && !sameKey)
     {
         Flush();
-    }
-
-    if (batching_ && shaderBlend)
-    {
-        for (const Rect& earlier : batchRects_)
-        {
-            if (rect.left <= earlier.right && earlier.left <= rect.right && rect.top <= earlier.bottom && earlier.top <= rect.bottom)
-            {
-                Flush();
-                break;
-            }
-        }
     }
 
     static const char* tracePrim = std::getenv("TWIN_HW_TRACE_PRIM");
@@ -4277,7 +4404,107 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
                      key.scissor[2], key.scissor[3], rect.left, rect.top, rect.right, rect.bottom);
     }
 
-    key_ = key;
+    // (A new key is the batch's after the flush above: the overlap's flush in AddPrimitive has nothing of it to draw then)
+    if (!sameKey)
+    {
+        __builtin_memcpy_inline(&key_, &key, sizeof(key));
+    }
+
+    AddPrimitive(state, vertexes, rect, colour, depth, n, shaderBlend, drawnPages, depthPages);
+    if (repeatable && tracePrim == nullptr)
+    {
+        last_.valid = true;
+        last_.generation = gs_.stateGeneration();
+        last_.clut = gs_.clutVersion();
+        last_.targetsVersion = targetsVersion_;
+        last_.filterMode = g_FilterMode;
+        last_.ditherMode = g_DitherMode;
+        last_.colour = colour;
+        last_.depth = depth;
+        last_.texture = state.textured ? lastTexture_ : nullptr;
+        last_.textureId = texture;
+        last_.shaderBlend = shaderBlend;
+    }
+
+    return true;
+}
+
+// The primitive drawn as the last one was: nothing it depended on changed but its vertexes. Its key would be the batch's, its
+// targets those TargetFor gave (the primitive no taller than they are), its texture what DecodeOnGpu gives at once (the region
+// it reads doesn't matter then); its pages are made current and drawn as every primitive's ($TWIN_HW_NO_FAST_DRAW: never)
+bool HwGs::DrawLikeLast(const Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count, Rect rect)
+{
+    static const bool off = std::getenv("TWIN_HW_NO_FAST_DRAW") != nullptr;
+    const LastDraw& last = last_;
+    if (off || !last.valid || last.generation != gs_.stateGeneration() || last.clut != gs_.clutVersion() ||
+        last.targetsVersion != targetsVersion_ || last.filterMode != g_FilterMode || last.ditherMode != g_DitherMode)
+    {
+        return false;
+    }
+
+    // (The targets' heights are whole pages, as TargetFor rounds the height it's asked for)
+    Target* colour = last.colour;
+    Target* depth = last.depth;
+    const u32 height = static_cast<u32>(rect.bottom + 1);
+    if (height > colour->height || (depth != nullptr && height > depth->height))
+    {
+        return false;
+    }
+
+    // DecodeOnGpu's first test, and no upscaled page in any region of the texture
+    if (last.texture != nullptr)
+    {
+        const GpuTexture& t = *last.texture;
+        if (!t.complete || t.checkedEpoch != epoch_ || t.shown == 0 || t.shown != last.textureId || (t.pages & newestMask_).any() ||
+            (t.pages & scaledPages_).any())
+        {
+            return false;
+        }
+    }
+
+    const s32 n = static_cast<s32>(colour->scale);
+    if (static_cast<u32>(rect.right) >= colour->width)
+    {
+        rect.right = static_cast<s32>(colour->width) - 1;
+    }
+
+    if (rect.right < rect.left)
+    {
+        stats.drawn++;
+        return true;
+    }
+
+    Gs::PageSet drawnPages;
+    RectPages(colour, rect, drawnPages);
+    cpuReason = "frame";
+    EnsureValid(colour, drawnPages);
+    Gs::PageSet depthPages;
+    if (depth != nullptr)
+    {
+        RectPages(depth, rect, depthPages);
+        cpuReason = "depth";
+        EnsureValid(depth, depthPages);
+    }
+
+    AddPrimitive(state, vertexes, rect, colour, depth, n, last.shaderBlend, drawnPages, depthPages);
+    return true;
+}
+
+void HwGs::AddPrimitive(const Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, const Rect& rect, Target* colour, Target* depth,
+                        s32 n, bool shaderBlend, const Gs::PageSet& drawnPages, const Gs::PageSet& depthPages)
+{
+    if (batching_ && shaderBlend)
+    {
+        for (const Rect& earlier : batchRects_)
+        {
+            if (rect.left <= earlier.right && earlier.left <= rect.right && rect.top <= earlier.bottom && earlier.top <= rect.bottom)
+            {
+                Flush();
+                break;
+            }
+        }
+    }
+
     batching_ = true;
     if (shaderBlend)
     {
@@ -4413,6 +4640,7 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
         MarkDrawn(depth, depthPages);
     }
 
+    static const char* tracePrim = std::getenv("TWIN_HW_TRACE_PRIM");
     if (tracePrim != nullptr && std::strtoull(tracePrim, nullptr, 10) == gs_.primitivesDrawn)
     {
         for (size_t i = vertexes_.size() >= 3 ? vertexes_.size() - 3 : 0; i < vertexes_.size(); i++)
@@ -4423,7 +4651,6 @@ bool HwGs::Draw(Gs::Gs::DrawState& state, const Gs::Vertex* vertexes, u32 count)
     }
 
     stats.drawn++;
-    return true;
 }
 
 void HwGs::Flush()

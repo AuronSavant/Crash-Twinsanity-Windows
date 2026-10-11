@@ -141,7 +141,7 @@ void EntryTime(u8* out, fs::file_time_type when)
         when - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
     std::time_t seconds = std::chrono::system_clock::to_time_t(system);
     std::tm local{};
-    localtime_r(&seconds, &local);
+    Native::LocalTime(seconds, &local);
     u16 year = static_cast<u16>(local.tm_year + 1900);
     u8 time[8] = {0,
                   static_cast<u8>(local.tm_sec),

@@ -615,6 +615,9 @@ void SetFocusPositionToPlayerCommand::Execute(TimeClock*, BehaviourRunner* runne
 void CacheLinkedInstanceCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLevel*)
 {
     ObjectNode* node = NodeOf(runner);
+#ifdef TWIN_NATIVE
+    ForgetFreedInstance(&node->agentRef2);
+#endif
     if (node->agentRef2 == nullptr)
     {
         AttachmentsNode* attachments = AttachmentsNodeOf(node->owner);

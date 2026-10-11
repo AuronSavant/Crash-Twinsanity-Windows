@@ -20,6 +20,8 @@ namespace NativeUi
 // for the code's texts, the native texts added at NativeTextFirst on. The array returned is the native build's own (it stays);
 // count is the file's line count and stays the same
 const char** ApplyTextOverrides(u32 file, const char* language, const char** lines, u32 count);
+// The lines ApplyTextOverrides keeps (for the prompts' labels) let go of: the self-test's, whose files it frees
+void ForgetTextLines();
 
 // The button prompts' glyphs in the game's texts (its font's codes): cross, circle, square, triangle, L1, R1, L2, R2. The texts'
 // prompts are labelled as the input in use has them (bindings.cpp: a key's name, another pad's letters; the glyphs themselves for a
@@ -71,6 +73,16 @@ enum NativeText : u32
     TextRefreshRate,
     Text50Hz,
     Text60Hz,
+    Text120Hz,
+    Text144Hz,
+    TextUnlimited,
+    TextGameLanguage,
+    TextLanguageWindows,
+    TextLanguageEnglish,
+    TextLanguageFrench,
+    TextLanguageGerman,
+    TextLanguageItalian,
+    TextLanguageSpanish,
     TextBugFixes,
     TextControls,
     TextResetControls,
@@ -131,6 +143,7 @@ enum NativeText : u32
     TextDescVSync,
     TextDescCrt,
     TextDescRefreshRate,
+    TextDescGameLanguage,
     TextDescScreenPosition,
     TextDescMusic,
     TextDescEffects,
@@ -271,7 +284,8 @@ enum Option : u32
     OptionPauseOnFocusLoss,
     // The game's widescreen setting at start-up (a save's own setting still applies once loaded)
     OptionWidescreen,
-    // NTSC's 60 Hz: the game's clock, its particles and the display's pacing (off: PAL's 50 Hz)
+    // The frame rate: PAL's 50 Hz (0), NTSC's 60 (1: the game's clock, its particles and the display's pacing), or NTSC's
+    // timing at 120 (2), 144 (3) or as fast as the computer goes (4), the game's 60ths of a second kept where it counts in them
     OptionRefresh60,
     // The harmless retail bugs fixed (NATIVE.md lists them)
     OptionRetailFixes,
@@ -315,6 +329,9 @@ enum Option : u32
     OptionMouseLook,
     OptionMouseSensitivity,
     OptionInvertMouseY,
+    // The game's language (its texts, its voices, its movies' sound): the computer's (0, as the PS2 took its own), English,
+    // French, German, Italian or Spanish; the game takes it when it starts (system.cpp's Platform::System::Language)
+    OptionLanguage,
     OptionCount,
 };
 
@@ -342,8 +359,16 @@ bool CutsceneSkipPressed();
 f32 SkipHoldProgress();
 bool MovieSkipHeld();
 void SkipHoldForTest(bool forced, const std::vector<s32>& inputs, f32 seconds);
+// How long a press has to be held to skip (the self-test's timings follow it)
+f32 SkipHoldSecondsForTest();
 // The game clock's frames a second for the retail value (the 60 Hz option's)
 s32 FramesPerSecond(s32 retail);
+// The frame rate the frames are paced at (50, 60, 120, 144; 0 as fast as they come)
+s32 FrameRate();
+// The game's work done a frame at a time that counts in 60ths of a second (the particles' emitters and events, the decals'
+// lives): at 50 and 60 Hz once a frame, as the PS2 did it; faster, once for each 60th gone by (none some frames), the time
+// left over kept in carried
+u32 GameTicks(f32 seconds, f32* carried);
 // The next key or gamepad button pressed, for the controls page (the pad reads nothing meanwhile): a key's SDL scancode, a
 // button's SDL gamepad button (GamepadTriggerBase on: the triggers)
 constexpr s32 GamepadTriggerBase = 0x100;

@@ -270,6 +270,9 @@ s32 Platform::Pads::Read(s32 port, s32 slot, u8* data)
     Native::SnapshotFrame();
     Native::QuickStartFrame();
     NativeFixes::Frame();
+    // The level sweep's frame here too: GameController::Update (its other caller) doesn't run while some cutscenes play, the pads'
+    // reads do (their skip polls them)
+    NativeUi::SweepFrame(true);
     FindGamepad();
     // The keyboard's keys and the gamepad's buttons by the controls' bindings (src/platform/native/ui/bindings.cpp: the defaults
     // are NATIVE.md's), the sticks the gamepad's (the keys bound to the left stick's directions over it)

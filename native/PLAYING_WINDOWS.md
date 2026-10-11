@@ -1,0 +1,96 @@
+# Playing Crash Twinsanity on Windows
+
+This is a native Windows port of Crash Twinsanity, made from a decompilation of the PAL PlayStation 2 game. It contains no game
+data: you need your own copy of the game.
+
+## What you need
+
+- 64 bit Windows 10 or 11, and a graphics card with OpenGL 3.3 (any from the last ten years).
+- A disc image of **your own** PAL copy of Crash Twinsanity (Europe/Australia, SLES-52568), as an `.iso` (or `.bin`/`.img`).
+  Other versions (USA, Japan) aren't supported.
+
+Nothing else: the folder carries the libraries the game needs.
+
+## First run
+
+1. Unzip `Crash-Twinsanity-Windows.zip` anywhere and open the `Crash Twinsanity` folder. Keep the files together: the program
+   needs the DLLs and the `fonts` folder beside it.
+2. Double-click `CrashTwinsanity.exe`. Windows may warn about an unrecognised app the first time: choose **More info**, then
+   **Run anyway**.
+3. On the first launch the game asks for your disc image with a file dialog. Pick your `.iso`. It remembers it; to pick another,
+   delete `disc_image.txt` from the settings folder (below), or start it with `CrashTwinsanity.exe --iso "C:\path\to\game.iso"`.
+
+## Where things are
+
+Everything the game keeps is in **%APPDATA%\Crash Twinsanity\** (paste that in the Explorer's address bar):
+
+| What | Where |
+| --- | --- |
+| Saves (the game's memory card) | `memorycard\` |
+| The options | `options.txt`, `resolution.txt` |
+| Your controls | `bindings.txt` |
+| The disc image's path | `disc_image.txt` |
+| Texture packs | `textures\SLES-52568\replacements\` (PCSX2's layout: a PCSX2 pack's `replacements` folder works as it is) |
+| The log | `log.txt` (when the game wasn't started from a terminal) |
+| Mods (files read instead of the game's: below) | `mods\` |
+
+Saving works like a PC game: no memory card screens. Save from the pause menu or at the game's save points; load from the
+main menu.
+
+## Controls
+
+A controller (Xbox, PlayStation, Switch and most others) works out of the box, as on the PS2 (its round stick's diagonals reach as far as the PS2 stick's square corners, so Crash runs on a diagonal too). Keyboard and mouse:
+
+| Action | Keys |
+| --- | --- |
+| Move | W A S D |
+| Look and turn the camera | The mouse (or the arrow keys) |
+| Jump | Space |
+| Spin | Left mouse button (or J) |
+| Crouch, skid, slide | Left Shift (or K) |
+| Status | Tab (or I) |
+| Shoulders | Q / E |
+| Pause | Esc (or Enter) |
+| Skip a cutscene | Hold any button |
+| Menus | Arrow keys (or the mouse), Enter to select, Esc to go back |
+| Fullscreen | Alt+Enter |
+
+Everything can be rebound in **Options > Controls**; the button prompts follow what you last used. Mouse look, its sensitivity
+and inverted Y are there too.
+
+## Options
+
+Options (from the main or pause menu) has PC settings: the language (English, French, German, Italian or Spanish texts, voices
+and movies; Windows' language by default, the new one from the game's next start), window size or fullscreen, the internal resolution, widescreen (4:3, 16:9
+or 21:9), the refresh rate, texture filtering, scanlines, texture packs, anti-aliasing, v-sync, volumes, skipping cutscenes,
+faster loading, and optional fixes of the original game's bugs (off plays exactly like the PS2).
+
+The refresh rate is 50 Hz (the European PS2's), 60 Hz (the default), or 120 Hz, 144 Hz or unlimited for smoother play on a fast
+computer and a high refresh rate monitor (turn v-sync off for unlimited). The game runs at the same speed at any rate; above 60
+it goes only as fast as the computer can draw it.
+
+## Mods
+
+A changed copy of one of the game's files in **%APPDATA%\Crash Twinsanity\mods\** at its path is read instead of it:
+`mods\Language\AgentLab\Italian.txt` for texts, `mods\Levels\Earth\Hub\beach.rm2` for a level, `mods\FMV\H01_A.PSS` for a
+movie. To get a file to change, from PowerShell or the Command Prompt in the game's folder:
+
+    .\CrashTwinsanity.exe --list-files
+    .\CrashTwinsanity.exe --extract=Language/AgentLab/Italian.txt
+
+The first lists the game's files; the second copies one from your disc image into the mods folder (a file already there is
+left alone). The log says which mods the game used. Remove the folder (or the file) to play the original again.
+
+## If something goes wrong
+
+The game writes what it's doing to `log.txt` in the settings folder, or to the terminal when it's started from one
+(`CrashTwinsanity.exe` in PowerShell or the Command Prompt). A crash writes a report there with the program's addresses; please
+include it with any bug report.
+
+## Licences
+
+The game's code here is a decompilation for preservation and study; Crash Twinsanity and its content belong to their owners.
+The folder carries SDL 3 (zlib licence), FFmpeg 9.0.2's libavcodec and libavutil (LGPL 2.1 or later: a decode-only build with
+just the MPEG-2 video decoder, its source https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz; `avcodec-63.dll` and `avutil-61.dll`
+are separate files you can replace with your own build of FFmpeg 9.x), the fonts Luckiest Guy (Apache 2.0) and Fredoka (SIL Open
+Font Licence) and stb_truetype (public domain / MIT); their licences are in the `licenses` folder.

@@ -15,11 +15,58 @@ struct GccVTableEntry
 };
 CHECK_SIZE(GccVTableEntry, 8);
 
+#ifdef TWIN_NATIVE
+// Natively the function behind a retail vtable entry is C++ returning its value at its own width, and a call through the
+// entry reads it at the width the caller asks for (CallVirtual<u32> of a bool function). The PS2's and Apple's arm64 callees
+// extend a narrow value to the whole register; x86-64's leave the bits above it as they were, so the caller has to know. The
+// data converter (native/tools/convert_data.py) marks an entry whose function returns a narrow integer in its index, which
+// only virtual bases use (none of the game's)
+enum GccNarrowReturn : u16
+{
+    GccReturnU8 = 0x1000,
+    GccReturnS8 = 0x2000,
+    GccReturnU16 = 0x3000,
+    GccReturnS16 = 0x4000,
+    GccReturnMask = 0x7000,
+};
+
+template <typename Result, typename... Args>
+inline Result CallNarrowed(const GccVTableEntry& entry, void* self, Args... args)
+{
+    // (Nested: sizeof isn't asked of void)
+    if constexpr (std::is_integral_v<Result>)
+    {
+        if constexpr (sizeof(Result) > 1)
+        {
+            switch (static_cast<u16>(entry.index) & GccReturnMask)
+            {
+            case GccReturnU8:
+                return static_cast<Result>(Abi::CallEabi<u8>(entry.function, self, args...));
+            case GccReturnS8:
+                return static_cast<Result>(Abi::CallEabi<s8>(entry.function, self, args...));
+            case GccReturnU16:
+                return static_cast<Result>(Abi::CallEabi<u16>(entry.function, self, args...));
+            case GccReturnS16:
+                return static_cast<Result>(Abi::CallEabi<s16>(entry.function, self, args...));
+            default:
+                break;
+            }
+        }
+    }
+
+    return Abi::CallEabi<Result>(entry.function, self, args...);
+}
+#endif
+
 template <typename Result, typename... Args>
 inline Result CallVirtual(const void* object, const GccVTableEntry* vtable, u32 slot, Args... args)
 {
     const GccVTableEntry& entry = vtable[slot];
     void* self = const_cast<u8*>(static_cast<const u8*>(object)) + entry.delta;
+#ifdef TWIN_NATIVE
+    // Natively a plain call, in the EABI's stand-in when the arguments mix floats and integers (Abi::EabiPointer)
+    return CallNarrowed<Result>(entry, self, args...);
+#else
     // The vtables hold the retail functions (or thunks to C++), which take their floats the EABI's way
     if constexpr (Abi::IsMixed<void*, Args...>)
     {
@@ -29,6 +76,7 @@ inline Result CallVirtual(const void* object, const GccVTableEntry* vtable, u32 
     {
         return reinterpret_cast<Result (*)(void*, Args...)>(entry.function)(self, args...);
     }
+#endif
 }
 
 // A GCC 2.9x pointer to a data member: the member's offset plus 1, 0 being the null pointer

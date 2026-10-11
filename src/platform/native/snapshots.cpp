@@ -109,7 +109,8 @@ namespace Native
 void SetSnapshotFolder(const char* folder)
 {
     g_Folder = folder;
-    std::filesystem::create_directories(g_Folder);
+    std::error_code ignored;
+    std::filesystem::create_directories(g_Folder, ignored);
 }
 
 void SnapshotFrame()
