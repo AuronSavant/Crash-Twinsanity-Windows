@@ -1,7 +1,8 @@
 # Playing Crash Twinsanity on Windows
 
 This is a native Windows port of Crash Twinsanity, made from a decompilation of the PAL PlayStation 2 game. It contains no game
-data: you need your own copy of the game.
+data: you need your own copy of the game. Its source code, credits and bug reports:
+https://github.com/GioPixelGH/Crash-Twinsanity-Windows
 
 ## What you need
 
@@ -95,4 +96,6 @@ The game's code here is a decompilation for preservation and study; Crash Twinsa
 The folder carries SDL 3 (zlib licence), FFmpeg 9.0.2's libavcodec and libavutil (LGPL 2.1 or later: a decode-only build with
 just the MPEG-2 video decoder, its source https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz; `avcodec-63.dll` and `avutil-61.dll`
 are separate files you can replace with your own build of FFmpeg 9.x), the fonts Luckiest Guy (Apache 2.0) and Fredoka (SIL Open
-Font Licence) and stb_truetype (public domain / MIT); their licences are in the `licenses` folder.
+Font Licence) and stb_truetype (public domain / MIT); their licences are in the `licenses` folder, with the port's own
+(`Crash-Twinsanity-Windows-LICENSE.txt`: MIT for the Windows port's changes; the decompilation and the Mac port it's built on
+keep their authors' rights). The icon is the game's cover art, © Activision.

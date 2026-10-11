@@ -48,6 +48,8 @@ def main():
     for name in ("LICENSE-LuckiestGuy.txt", "OFL-Fredoka.txt", "README.md"):
         shutil.copy2(HERE / "native" / "third_party" / "fonts" / name, licenses / f"fonts-{name}")
     shutil.copy2(HERE / "native" / "third_party" / "stb" / "LICENSE.txt", licenses / "stb-LICENSE.txt")
+    # The port's own licence (what it covers is in it)
+    shutil.copy2(HERE / "LICENSE", licenses / "Crash-Twinsanity-Windows-LICENSE.txt")
     deps = Path(arguments.deps)
     found = sorted(deps.glob("SDL3-*/LICENSE.txt"))
     if found:
