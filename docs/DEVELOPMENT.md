@@ -1,7 +1,7 @@
 # Working on the decomp
 
 How the decomp is put together, how builds get tested and what replacing the game's code has to look out for. Setting up and
-building are in the [README](../README.md).
+building are in the [README](../README_DECOMP.md).
 
 ## Symbols and the split
 
