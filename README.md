@@ -159,8 +159,8 @@ repository shipped isn't included here: get it from its author.
 
 **The icon** is the game's European cover art, © Activision.
 
-**AI assistance:** this port was written with [Claude Code](https://claude.com/claude-code) (Anthropic). Each commit made with
-it says so.
+**AI assistance:** this port was written with the help of [Claude Code](https://claude.com/claude-code) (Anthropic). As the
+developer, I reviewed and supervised the work. Each commit made with it says so.
 
 ## Licence
 
