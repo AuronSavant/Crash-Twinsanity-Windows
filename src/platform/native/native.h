@@ -24,6 +24,11 @@ void ParseArguments(int& argc, char** argv);
 // Where the app keeps its settings and saves, and the disc image asked for with the system's file dialog (remembered there)
 std::string SettingsFolder();
 std::string PickDiscImage();
+// The disc image (--iso, $TWINSANITY_ISO, local.json's, the one picked before, or one picked now) opened and checked to be the
+// PAL disc, once; then the retail executable's data read from its SLES_525.68 (build/native/data.cpp's NativeLoadRetailData:
+// the build has none of the game's bytes), before NativeApplyDataFixups. The program ends with a message when either fails
+void OpenDiscImage();
+void LoadRetailData();
 // --snapshots DIR: the shown picture saved as a PNG every 2 seconds (snapshots.cpp), checked once a frame
 void SetSnapshotFolder(const char* folder);
 void SnapshotFrame();

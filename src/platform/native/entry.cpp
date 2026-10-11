@@ -188,6 +188,7 @@ int main(int argc, char** argv)
         }
     }
 
+    Native::LoadRetailData();
     NativeApplyDataFixups();
     // $TWIN_FIXED_TIME: the test runs' time (debug.h's g_DebugFixedTime): every frame takes exactly a frame's time and reads
     // finish when asked about, so what a frame draws doesn't depend on how fast the machine is (two builds compared frame by frame)

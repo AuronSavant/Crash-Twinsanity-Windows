@@ -276,6 +276,7 @@ int main(int argc, char** argv)
     // Frame-locked and silent unless asked otherwise
     setenv("TWINSANITY_AUDIO", "frames", 0);
     Native::ParseArguments(argc, argv);
+    Native::LoadRetailData();
     NativeApplyDataFixups();
     if (argc < 5)
     {

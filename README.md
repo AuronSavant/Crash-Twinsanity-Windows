@@ -20,8 +20,8 @@ Windows needs, makes it run at a steady 60 fps, and fixes the crashes found by p
   ([native/sweep/results_windows.md](native/sweep/results_windows.md)). 108 played (7 of them until a game over); the other
   23 can't be started on their own, because they are parts of hubs or tunnels only entered from a neighbouring area.
 - **Not done yet:** a full playthrough to the credits.
-- **No download yet.** A build of this repository contains data taken from the game's executable, so it can't be shared. The
-  next step is a release that reads that data from your own disc image when it starts. Until then, build it yourself: see
+- **No download yet.** The program now reads the game's data from your own disc image when it starts, so a build has none of
+  the game's files or data. A release is being prepared. Until then, build it yourself: see
   [Building on Windows](#building-on-windows).
 - **macOS and Linux:** the platform code is HAB3X's and the Windows changes are kept apart (`_WIN32`), but this fork is only
   built and tested on Windows.
@@ -48,6 +48,8 @@ mouse and controller, saves, cutscene skipping, community fixes):
   - Crashes in the caverns (a reference to an object already freed, an animation of zero length).
   - VU1 programs that ran away (two copies of the same data declared with different sizes).
 - **Controllers:** a modern controller's round stick is mapped to the PS2 stick's square, so Crash runs on diagonals too.
+- **The game's data from your disc:** the program carries none of the game's data. It reads the data from your disc image's
+  executable when it starts, checks that it's the PAL release, and says so clearly when the disc image is wrong.
 
 [native/WINDOWS.md](native/WINDOWS.md) explains each change, with the reasons and how they were tested.
 [native/PLAYING_WINDOWS.md](native/PLAYING_WINDOWS.md) is the player's guide: options, controls, saves, mods.

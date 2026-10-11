@@ -19,6 +19,8 @@ Nothing else: the folder carries the libraries the game needs.
    **Run anyway**.
 3. On the first launch the game asks for your disc image with a file dialog. Pick your `.iso`. It remembers it; to pick another,
    delete `disc_image.txt` from the settings folder (below), or start it with `CrashTwinsanity.exe --iso "C:\path\to\game.iso"`.
+   The game's data is read from it every time the game starts. If it isn't the PAL release (another game, another version of
+   Crash Twinsanity, or a changed copy), a message says so and the next start asks for the disc image again.
 
 ## Where things are
 

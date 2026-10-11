@@ -5,7 +5,10 @@ The PS2 build links the game's data (.data, .rodata, .sdata, .bss, .sbss) from t
 executable, its pointers as symbols. The native build's pointers are 64 bit, so each object is laid out again by its C++ type
 (build/native/data_types.json, native/tools/data_types.py): clang's record layouts for the PS2 (mips64el n32, the decomp's own
 layout checks hold there) and for the host give every field's place on both, numbers and text are copied to their native place,
-and every pointer becomes a fixup applied at start-up (NativeApplyDataFixups) before the game runs. An object the C++ doesn't
+and every pointer becomes a fixup applied at start-up (NativeApplyDataFixups) before the game runs. The bytes themselves aren't
+in the build: data.cpp has where each run of them comes from in the retail executable, and the program reads them from the
+player's disc image at start-up (NativeLoadRetailData, before the fixups). The converter checks that the executable's bytes laid
+out that way give exactly the objects it made. An object the C++ doesn't
 name but other data points at gets its type from the pointer's type; one nothing reaches is left out. Nothing is guessed: an
 object whose layout can't be worked out exactly is reported, and the build stops on it unless it's listed in KNOWN_RAW below.
 
@@ -384,6 +387,9 @@ class Converter:
         self.last_type = None
         # What each symbol data points at is, by the pointer's type ("const char" for text): {symbol: {pointee types}}
         self.pointees = collections.defaultdict(set)
+        # Where each object's bytes come from (place's copies): ("copy", native offset, PS2 offset, bytes) and ("widen", native
+        # offset, PS2 offset, signed) for a 32 bit address-sized integer made 64 bits
+        self.ops = []
 
     def convert(self, label, t):
         """(native bytes, align, fixups [(offset, symbol, addend)]) of the object as type t"""
@@ -409,11 +415,18 @@ class Converter:
         out = bytearray(native_size)
         fixups = []
         self.used_relocs = set()
+        self.ops = []
         self.place(label, t, data, relocs, 0, out, 0, fixups)
         for off in relocs:
             if off not in self.used_relocs and off < ps2_size:
                 self.problems.append(f"{label}: the pointer at +{off:#x} ({relocs[off][0]}) isn't a pointer field of {t}")
         return out, max(native_align, 16 if obj["section"] in ("vutext", "vudata") else 4), fixups
+
+    def copied(self, dst, src, n, data):
+        """A run of the retail bytes placed (as many as the object has)"""
+        n = min(n, len(data) - src)
+        if n > 0:
+            self.ops.append(("copy", dst, src, n))
 
     def whole_elements(self, element, size, data, relocs, count):
         """How many elements of an unsized array are its own: up to the first holding a number where a pointer goes (another,
@@ -453,12 +466,15 @@ class Converter:
                     return
                 value = struct.unpack_from("<I" if k == "uptr" else "<i", data, src)[0] if src + 4 <= len(data) else 0
                 out[dst:dst + 8] = struct.pack("<Q" if k == "uptr" else "<q", value)
+                if src + 4 <= len(data):
+                    self.ops.append(("widen", dst, src, k == "sptr"))
                 return
             if src in relocs:
                 # An address kept in an integer the C++ doesn't widen: it must be widened (uiptr)
                 self.used_relocs.add(src)
                 self.problems.append(f"{label}+{src:#x}: the address of {relocs[src][0]} in a {t}")
             out[dst:dst + native] = data[src:src + ps2].ljust(native, b"\0")
+            self.copied(dst, src, ps2, data)
             return
         if kind == "array":
             es, en, _, _ = self.types.sizes(p[1])
@@ -470,6 +486,7 @@ class Converter:
                         if label not in KNOWN_RAW:
                             self.problems.append(f"{label}+{off:#x}: the address of {relocs[off][0]} in {t}")
                 out[dst:dst + n] = data[src:src + n].ljust(n, b"\0")
+                self.copied(dst, src, n, data)
                 return
             for i in range(p[2]):
                 self.place(label, p[1], data, relocs, src + i * es, out, dst + i * en, fixups)
@@ -482,6 +499,7 @@ class Converter:
                     self.used_relocs.add(off)
                     self.problems.append(f"{label}+{off:#x}: the address of {relocs[off][0]} in {t}")
             out[dst:dst + n] = data[src:src + n].ljust(n, b"\0")
+            self.copied(dst, src, n, data)
             return
         # Field by field: the two dumps list the same members in the same order
         pf, nf = ps2["fields"], native["fields"]
@@ -501,6 +519,7 @@ class Converter:
                 if unit not in covered:
                     covered.add(unit)
                     out[dst + no:dst + no + 4] = data[src + unit:src + unit + 4]
+                    self.copied(dst + no, src + unit, 4, data)
                 continue
             # Unions: the first member placed decides (the dump lists them all at one offset)
             if po in covered and native.get("union"):
@@ -556,6 +575,7 @@ def main():
                                 if i["kind"] == "var" and not i.get("defined") and l not in objects)
 
     results, problems, warnings = {}, [], []
+    recipes = {}
     aliases = {}  # label -> (container label, PS2 offset)
     by_section = collections.defaultdict(list)
     for label in order:
@@ -599,6 +619,7 @@ def main():
             problems.append(f"{label}: no layout for {error}")
             continue
         results[label] = (t, out, align, fixups)
+        recipes[label] = conv.ops
         obj = objects[label]
         ps2_covered = conv.types.sizes(conv.last_type)[0] if conv.last_type else len(obj["data"])
         if obj.get("pads") and ps2_covered < len(obj["data"]) and (obj["relocs"] or any(obj["data"][ps2_covered:])):
@@ -635,8 +656,8 @@ def main():
 
     for w in warnings:
         print("WARNING", w, file=sys.stderr)
-    mark_narrow_returns(results, types_info, types, problems)
-    write_cpp(results, objects, alias_offsets)
+    marks = mark_narrow_returns(results, types_info, types, problems)
+    write_cpp(results, objects, alias_offsets, recipes, marks, problems)
     if problems:
         for p in problems:
             print("PROBLEM", p, file=sys.stderr)
@@ -674,7 +695,7 @@ def mark_narrow_returns(results, types_info, types, problems):
     """Marks the retail vtables' entries whose C++ function returns a narrow integer (gcc2.h's CallNarrowed): x86-64 leaves
     the register's bits above it as they were, where the PS2 and Apple's arm64 extend it, and the calls through the vtables
     read 32 bits (CallVirtual<u32> of a bool function)"""
-    marked = 0
+    marks = []
     for label, (t, out, align, fixups) in results.items():
         for offset, symbol, addend in fixups:
             info = types_info.get(symbol)
@@ -689,11 +710,110 @@ def mark_narrow_returns(results, types_info, types, problems):
             at = offset - VTABLE_FUNCTION_OFFSET + VTABLE_INDEX_OFFSET
             index = struct.unpack_from("<H", out, at)[0]
             struct.pack_into("<H", out, at, index | mark)
-            marked += 1
-    print(f"{marked} vtable entries of functions returning narrow integers marked", file=sys.stderr)
+            marks.append((label, at, mark))
+    print(f"{len(marks)} vtable entries of functions returning narrow integers marked", file=sys.stderr)
+    return marks
 
-def write_cpp(results, objects, aliases):
-    lines = ["// Generated by native/tools/convert_data.py from the split's data: don't edit",
+# ------------------------------------------------------------------------------------------------- the bytes from the disc
+EXECUTABLE = HERE / "SLES_525.68"
+FNV_BASIS, FNV_PRIME = 0xCBF29CE484222325, 0x100000001B3
+
+def fnv1a(data, h=FNV_BASIS):
+    """FNV-1a, 64 bits (data.cpp's Fnv1a the same): the executable's and the objects' check"""
+    for b in data:
+        h = ((h ^ b) * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+def read_executable():
+    """The retail executable's bytes and its loaded segments: [(address, file offset, bytes in the file, bytes in memory)]"""
+    elf = EXECUTABLE.read_bytes()
+    phoff = struct.unpack_from("<I", elf, 0x1C)[0]
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x2A)
+    segments = []
+    for i in range(phnum):
+        kind, offset, address, _, file_size, memory_size = struct.unpack_from("<IIIIII", elf, phoff + i * phentsize)
+        # PT_LOAD: past the file's bytes, zero storage (.bss)
+        if kind == 1:
+            segments.append((address, offset, file_size, memory_size))
+    return elf, segments
+
+def file_offset(segments, address, size):
+    """Where size bytes at address are in the executable's file: None in zero storage (.bss)"""
+    for start, offset, file_size, memory_size in segments:
+        if start <= address and address + size <= start + file_size:
+            return offset + address - start
+        if start + file_size <= address and address + size <= start + memory_size:
+            return None
+    raise LookupError(f"{address:#x} (+{size:#x}) isn't inside the executable's loaded segments")
+
+def make_recipe(results, objects, recipes, marks, problems):
+    """The runs of the executable's bytes that make the objects: copies [(label, native offset, file offset, bytes)], widened
+    integers [(label, native offset, file offset, signed)]; checked by laying the executable's bytes out that way"""
+    elf, segments = read_executable()
+    copies, widens = [], []
+    for label, (t, out, align, fixups) in results.items():
+        obj = objects[label]
+        base, data = obj["address"], obj["data"]
+        if base is None:
+            # The split's binaries (the VU microcode's .incbin) have no address comment: splat's name has it
+            named = re.fullmatch(r"D_([0-9A-Fa-f]{8})", label)
+            if named is None:
+                problems.append(f"{label}: no address in the split")
+                continue
+            base = int(named.group(1), 16)
+        # The addresses' words are 0 in the split's bytes (they're fixups) and the PS2's addresses in the executable's
+        address_bytes = {at + i for at in obj["relocs"] for i in range(4)}
+        runs = []
+        for op in recipes.get(label, []):
+            if op[0] == "widen":
+                _, dst, src, signed = op
+                if any(data[src:src + 4]):
+                    widens.append((label, dst, file_offset(segments, base + src, 4), signed))
+                continue
+            _, dst, src, n = op
+            i = 0
+            while i < n:
+                if src + i in address_bytes:
+                    i += 1
+                    continue
+                j = i
+                while j < n and src + j not in address_bytes:
+                    j += 1
+                # Zeros needn't come from anywhere (the objects start zero), so neither does storage the file has none of
+                if any(data[src + i:src + j]):
+                    runs.append((dst + i, file_offset(segments, base + src + i, j - i), j - i))
+                i = j
+        runs.sort()
+        for dst, offset, n in runs:
+            if copies and copies[-1][0] == label and copies[-1][1] + copies[-1][3] == dst \
+                    and copies[-1][2] + copies[-1][3] == offset:
+                copies[-1] = (label, copies[-1][1], copies[-1][2], copies[-1][3] + n)
+            else:
+                copies.append((label, dst, offset, n))
+
+    built = {label: bytearray(len(out)) for label, (t, out, align, fixups) in results.items()}
+    for label, dst, offset, n in copies:
+        built[label][dst:dst + n] = elf[offset:offset + n]
+    for label, dst, offset, signed in widens:
+        value = struct.unpack_from("<i" if signed else "<I", elf, offset)[0]
+        built[label][dst:dst + 8] = struct.pack("<q" if signed else "<Q", value)
+    for label, at, mark in marks:
+        index = struct.unpack_from("<H", built[label], at)[0]
+        struct.pack_into("<H", built[label], at, index | mark)
+    for label, (t, out, align, fixups) in results.items():
+        if built[label] != out:
+            at = next(i for i in range(len(out)) if built[label][i] != out[i])
+            problems.append(f"{label}: the executable's bytes laid out give {built[label][at]:#04x} at +{at:#x}, the split's "
+                            f"{out[at]:#04x}")
+    data_hash = FNV_BASIS
+    for label, (t, out, align, fixups) in results.items():
+        data_hash = fnv1a(out, data_hash)
+    return copies, widens, (len(elf), fnv1a(elf), data_hash)
+
+def write_cpp(results, objects, aliases, recipes, marks, problems):
+    copies, widens, (executable_size, executable_hash, data_hash) = make_recipe(results, objects, recipes, marks, problems)
+    lines = ["// Generated by native/tools/convert_data.py from the split's data: don't edit. None of the game's bytes are here: the",
+             "// objects start zero and NativeLoadRetailData lays the executable's bytes (from the player's disc) out into them",
              "#include <stdint.h>", "#include <string.h>", "",
              "// The retail names as symbols (common.h's RETAIL): Mach-O's start with an underscore",
              "#ifdef __APPLE__", '#define SYMBOL(name) "_" name', "#else", "#define SYMBOL(name) name", "#endif", ""]
@@ -703,13 +823,12 @@ def write_cpp(results, objects, aliases):
         if s not in results and s not in aliases:
             lines.append(f'extern char x_{cxx_escape(s)} asm(SYMBOL("{s}"));')
     for label, (t, out, align, fixups) in results.items():
-        body = ",".join(str(b) for b in out) if any(out) else ""
         # x86-64's ABI gives a global array of 16 bytes or more 16 byte alignment, and clang counts on it wherever the C++
         # declares one (aligned SSE loads and stores, movaps): an alignas of less would lower it here, so objects that big are
         # 16 byte aligned (only more than they need elsewhere)
         if len(out) >= 16:
             align = max(align, 16)
-        lines.append(f'// {t}\nalignas({align}) unsigned char x_{cxx_escape(label)}[{max(len(out), 1)}] asm(SYMBOL("{label}")) = {{{body}}};')
+        lines.append(f'// {t}\nalignas({align}) unsigned char x_{cxx_escape(label)}[{max(len(out), 1)}] asm(SYMBOL("{label}")) = {{}};')
     lines.append("}\n")
     # Labels inside another object (the PS2's neighbouring globals a C++ struct covers): symbols at their native offsets in it
     for label, (container, offset) in sorted(aliases.items()):
@@ -722,12 +841,54 @@ def write_cpp(results, objects, aliases):
         for off, symbol, addend in fixups:
             target = f"x_{cxx_escape(symbol)}"
             lines.append(f"    {{x_{cxx_escape(label)} + {off}, reinterpret_cast<const char*>(&{target}) + ({addend})}},")
-    lines.append("};\n}\n")
+    lines.append("};\n")
+    # The executable's bytes: runs copied, 32 bit integers widened, the vtables' narrow returns marked (mark_narrow_returns)
+    lines.append("struct Copy\n{\n    unsigned char* at;\n    uint32_t from;\n    uint32_t size;\n};\n")
+    lines.append("struct Widen\n{\n    unsigned char* at;\n    uint32_t from;\n    uint32_t isSigned;\n};\n")
+    lines.append("struct Mark\n{\n    unsigned char* at;\n    uint32_t bits;\n};\n")
+    lines.append("struct Object\n{\n    const unsigned char* at;\n    uint32_t size;\n};\n")
+    lines.append("// Each list ends with a null entry\nconst Copy g_Copies[] = {")
+    for label, dst, offset, n in copies:
+        lines.append(f"    {{x_{cxx_escape(label)} + {dst}, {offset:#x}, {n}}},")
+    lines.append("    {nullptr, 0, 0},\n};\n\nconst Widen g_Widens[] = {")
+    for label, dst, offset, signed in widens:
+        lines.append(f"    {{x_{cxx_escape(label)} + {dst}, {offset:#x}, {int(signed)}}},")
+    lines.append("    {nullptr, 0, 0},\n};\n\nconst Mark g_Marks[] = {")
+    for label, at, mark in marks:
+        lines.append(f"    {{x_{cxx_escape(label)} + {at}, {mark:#x}}},")
+    lines.append("    {nullptr, 0},\n};\n\nconst Object g_Objects[] = {")
+    for label, (t, out, align, fixups) in results.items():
+        lines.append(f"    {{x_{cxx_escape(label)}, {len(out)}}},")
+    lines.append("    {nullptr, 0},\n};\n")
+    lines.append(f"constexpr uint64_t ExecutableSize = {executable_size};\nconstexpr uint64_t ExecutableHash = {executable_hash:#x}ull;")
+    lines.append(f"constexpr uint64_t DataHash = {data_hash:#x}ull;\nconstexpr uint64_t FnvBasis = {FNV_BASIS:#x}ull;\n")
+    lines.append("uint64_t Fnv1a(const unsigned char* bytes, uint64_t size, uint64_t hash)\n{\n"
+                 "    for (uint64_t i = 0; i < size; i++)\n    {\n"
+                 f"        hash = (hash ^ bytes[i]) * {FNV_PRIME:#x}ull;\n    }}\n\n    return hash;\n}}\n}}\n")
+    lines.append("// The retail executable's bytes (SLES_525.68, read from the disc image) laid out into the objects, before the fixups:\n"
+                 "// 0 when done, 1 when it isn't the executable this build is for (another version, or changed), 2 when the objects\n"
+                 "// don't come out as the build made them\n"
+                 'extern "C" int NativeLoadRetailData(const unsigned char* executable, uint64_t size)\n{\n'
+                 "    if (size != ExecutableSize || Fnv1a(executable, size, FnvBasis) != ExecutableHash)\n    {\n        return 1;\n    }\n\n"
+                 "    for (const Copy* copy = g_Copies; copy->at != nullptr; copy++)\n    {\n"
+                 "        memcpy(copy->at, executable + copy->from, copy->size);\n    }\n\n"
+                 "    for (const Widen* widen = g_Widens; widen->at != nullptr; widen++)\n    {\n"
+                 "        uint32_t value;\n        memcpy(&value, executable + widen->from, sizeof(value));\n"
+                 "        uint64_t wide = widen->isSigned != 0 ? static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(value))) : value;\n"
+                 "        memcpy(widen->at, &wide, sizeof(wide));\n    }\n\n"
+                 "    for (const Mark* mark = g_Marks; mark->at != nullptr; mark++)\n    {\n"
+                 "        uint16_t index;\n        memcpy(&index, mark->at, sizeof(index));\n"
+                 "        index = static_cast<uint16_t>(index | mark->bits);\n        memcpy(mark->at, &index, sizeof(index));\n    }\n\n"
+                 "    uint64_t hash = FnvBasis;\n    for (const Object* object = g_Objects; object->at != nullptr; object++)\n    {\n"
+                 "        hash = Fnv1a(object->at, object->size, hash);\n    }\n\n"
+                 "    return hash == DataHash ? 0 : 2;\n}\n")
     lines.append('extern "C" void NativeApplyDataFixups()\n{\n    for (const Fixup& fixup : g_Fixups)\n    {\n'
                  '        memcpy(fixup.at, &fixup.to, sizeof(fixup.to));\n    }\n}')
     (BUILD / "data.cpp").write_text("\n".join(lines) + "\n")
     print(f"build/native/data.cpp: {len(results)} objects, {len(aliases)} inside others, "
-          f"{sum(len(r[3]) for r in results.values())} fixups")
+          f"{sum(len(r[3]) for r in results.values())} fixups, {len(copies)} runs of the executable's bytes "
+          f"({sum(c[3] for c in copies)} bytes), {len(widens)} widened")
+
 
 if __name__ == "__main__":
     main()

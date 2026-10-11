@@ -333,6 +333,7 @@ int main(int argc, char** argv)
         std::printf("harness: glyph image for %c %s\n", glyphCode, supported ? "set" : "not supported");
     }
 
+    Native::LoadRetailData();
     NativeApplyDataFixups();
     NativeGraphics::SetPacing(false);
     NativeGraphicsSetRenderer(hardware ? 1 : 0);

@@ -140,6 +140,33 @@ going on without the rest of its work. To look at one: `$TWIN_VU_DUMP=FOLDER` wr
 256 codes with their registers and data (vif_history_N.txt), `$TWIN_VU_TRACE_RUNAWAY` (with `$TWIN_VU_TRACE_STEPS`) the
 instructions it goes round, each with the integer registers.
 
+## The game's data from the disc
+
+The game's C++ uses the retail executable's data: its tables, texts, numbers and the VU microcode (`.data`, `.rodata`, `.sdata`,
+`.vutext`, `.vudata`). `native/tools/convert_data.py` lays each object out for the native build from the split. The program
+doesn't carry those bytes, on every platform. `build/native/data.cpp` has every object zeroed, with where each run of its bytes
+comes from in `SLES_525.68`: 381 runs, 66 KB of the executable (53 KB of it the VU microcode), 1 address-sized integer widened to
+64 bits, and the 88 vtable entries' narrow-return marks. At start-up, before the fixups and before the game runs,
+`Native::LoadRetailData` (system.cpp) reads `SLES_525.68` from the player's disc image and `NativeLoadRetailData` (data.cpp) lays
+it out.
+
+The checks:
+
+- **At build time:** the converter lays the executable's bytes out the same way and compares them with the objects it made from
+  the split. The build stops on any difference.
+- **At start-up:** the executable's size and FNV-1a hash must be the PAL release's. Then the objects' hash must be the one the
+  build made. A disc image without `SLES_525.68`, another version or a changed copy is refused with a message box (the log
+  only, `--headless`). One that was remembered (`disc_image.txt`) or just picked is forgotten, so the next start asks again.
+
+Tested: the same pictures as the build with the bytes compiled in, frame for frame (35 pictures, 1 every 100 frames, from the
+start with `$TWIN_FIXED_TIME=1` and `$TWINSANITY_AUDIO=frames`); the beach, the first boss's area, the caverns' tunnel and High
+Seas played 30 s each by the level sweep; another game's disc image and a changed `SLES_525.68` (as a mod) refused.
+
+VU1's and VU0's programs are still translated to C++ at build time (`vu1_translate.py`), from the split's copy of the microcode:
+generated code, like the decompilation's own C++, with none of the microcode's bytes kept. The interpreter that could run them
+from the microcode read at start-up instead is too slow: the beach at an unlimited frame rate ran at 15 fps interpreted
+(`$TWIN_VU1=interpret`), 70 translated.
+
 ## Debugging
 
 - A crash prints the registers and the return addresses: `llvm-symbolizer --obj=build/native/cmake/CrashTwinsanity.exe -f -i
@@ -169,6 +196,6 @@ instructions it goes round, each with the integer registers.
 DLLs, the fonts, the licences and native/PLAYING_WINDOWS.md as README.txt. The program's icon is native/icon/AppIcon.ico (the box
 art, 16 to 256 pixels; `native/tools/make_icon.py` still makes one from the HUD's Crash head for the Mac build).
 
-The program is built with the retail executable's data (`build/native/data.cpp`, from the split) and VU1's programs translated
-from its microcode compiled in: a build is for its builder's own use, made from their own disc, and isn't to be shared. A
-release that reads those from the player's disc image at start-up instead is the next step.
+The zip has none of the game's files or data: the program reads the retail executable's data from the player's disc image
+when it starts ("The game's data from the disc", above). It has the decompilation's C++ and the VU programs' translation,
+compiled.
