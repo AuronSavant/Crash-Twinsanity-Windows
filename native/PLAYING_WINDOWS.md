@@ -20,8 +20,9 @@ Nothing else: the folder carries the libraries the game needs.
    **Run anyway**.
 3. On the first launch the game asks for your disc image with a file dialog. Pick your `.iso`. It remembers it; to pick another,
    delete `disc_image.txt` from the settings folder (below), or start it with `CrashTwinsanity.exe --iso "C:\path\to\game.iso"`.
-   The game's data is read from it every time the game starts. If it isn't the PAL release (another game, another version of
-   Crash Twinsanity, or a changed copy), a message says so and the next start asks for the disc image again.
+   The game's data is read from it every time the game starts. If you move or rename the disc image, the game says it isn't
+   where it was and asks for it again. If it isn't the PAL release (another game, another version of Crash Twinsanity, or a
+   changed copy), a message says so and asks for another.
 
 ## Where things are
 
@@ -34,7 +35,7 @@ Everything the game keeps is in **%APPDATA%\Crash Twinsanity\** (paste that in t
 | Your controls | `bindings.txt` |
 | The disc image's path | `disc_image.txt` |
 | Texture packs | `textures\SLES-52568\replacements\` (PCSX2's layout: a PCSX2 pack's `replacements` folder works as it is) |
-| The log | `log.txt` (when the game wasn't started from a terminal) |
+| The log | `log.txt` (when the game wasn't started from a terminal), the run before's `log.previous.txt` |
 | Mods (files read instead of the game's: below) | `mods\` |
 
 Saving works like a PC game: no memory card screens. Save from the pause menu or at the game's save points; load from the
@@ -87,8 +88,10 @@ left alone). The log says which mods the game used. Remove the folder (or the fi
 ## If something goes wrong
 
 The game writes what it's doing to `log.txt` in the settings folder, or to the terminal when it's started from one
-(`CrashTwinsanity.exe` in PowerShell or the Command Prompt). A crash writes a report there with the program's addresses; please
-include it with any bug report.
+(`CrashTwinsanity.exe` in PowerShell or the Command Prompt). A crash writes a report there with the program's addresses, and so
+does a freeze (the game stuck for 20 seconds: where it's stuck). Each start keeps the last run's log as `log.previous.txt`, so
+after a freeze or a crash you can start the game again and still send it. Please include it with any bug report, with where in
+the game it happened.
 
 ## Licences
 

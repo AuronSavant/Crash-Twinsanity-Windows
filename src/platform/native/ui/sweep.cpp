@@ -8,14 +8,22 @@
 
 #include "native.h"
 
+#include "game/chunkdata.h"
 #include "game/gamecontroller.h"
+#include "game/instances.h"
+#include "game/place.h"
+#include "game/player.h"
+#include "game/reference.h"
 #include "game/string.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace NativeUi
 {
@@ -58,6 +66,287 @@ void ReadSettings()
 
     g_Start = Clock::now();
     g_LastFrame = g_Start;
+}
+
+// $TWIN_HOP=cryscave,escape: while playing, the player taken through its chunk's link to each of those chunks in turn (the tests'
+// way into chunks only entered from a neighbour), placed as the game's WarpToChunkLinkTowardsPlayer places an instance: half a
+// unit in front of the link's load wall, its middle, where the link takes it. The player's chunk changes are logged
+void HopFrame()
+{
+    static const char* hops = std::getenv("TWIN_HOP");
+    static std::vector<std::string> targets;
+    static size_t next = 0;
+    static std::string lastChunk;
+    static Clock::time_point lastHop;
+    if (hops == nullptr || G_GameController == nullptr || G_GameController->State() != GameController::StatePlaying ||
+        g_PlayerInstance == nullptr || g_PlayerInstance->object == nullptr)
+    {
+        return;
+    }
+
+    if (targets.empty())
+    {
+        std::string list = hops;
+        for (size_t start = 0; start <= list.size();)
+        {
+            size_t comma = list.find(',', start);
+            comma = comma == std::string::npos ? list.size() : comma;
+            if (comma > start)
+            {
+                targets.push_back(list.substr(start, comma - start));
+            }
+            start = comma + 1;
+        }
+    }
+
+    auto* player = static_cast<InstanceContext*>(g_PlayerInstance->object);
+    ChunkData* chunk = player->chunk;
+    if (chunk == nullptr || chunk->name.string == nullptr)
+    {
+        return;
+    }
+
+    std::string name = chunk->name.string;
+    if (name != lastChunk)
+    {
+        Native::Log("hop: the player in %s", name.c_str());
+        for (ChunkLinkData* link = chunk->links; link != nullptr; link = link->next)
+        {
+            const char* linked = link->linkedData != nullptr && link->linkedData->name.string != nullptr
+                                     ? link->linkedData->name.string
+                                     : "?";
+            Native::Log("hop:   linked to %s%s%s", linked, link->loadWall != nullptr ? "" : " (no wall)",
+                        link->flags.linkedRm2Loaded != 0 ? "" : " (not loaded)");
+        }
+
+        lastChunk = name;
+    }
+
+    if (next < targets.size() && name.size() >= targets[next].size() &&
+        name.compare(name.size() - targets[next].size(), std::string::npos, targets[next]) == 0)
+    {
+        next++;
+        return;
+    }
+
+    Clock::time_point now = Clock::now();
+    if (next >= targets.size() || now - lastHop < std::chrono::seconds(2))
+    {
+        return;
+    }
+
+    for (ChunkLinkData* link = chunk->links; link != nullptr; link = link->next)
+    {
+        ChunkData* linked = link->linkedData;
+        if (linked == nullptr || linked->name.string == nullptr || link->loadWall == nullptr || link->flags.linkedRm2Loaded == 0)
+        {
+            continue;
+        }
+
+        std::string linkedName = linked->name.string;
+        if (linkedName.size() < targets[next].size() ||
+            linkedName.compare(linkedName.size() - targets[next].size(), std::string::npos, targets[next]) != 0)
+        {
+            continue;
+        }
+
+        const LoadWall* wall = link->loadWall;
+        Vector4 position = {0.0f, 0.0f, 0.0f, 1.0f};
+        for (const Vector4& corner : wall->corners)
+        {
+            position.x += corner.x * 0.25f;
+            position.y += corner.y * 0.25f;
+            position.z += corner.z * 0.25f;
+        }
+
+        position.x += wall->plane.x * 0.5f;
+        position.y += wall->plane.y * 0.5f;
+        position.z += wall->plane.z * 0.5f;
+        ObjectPlace* place = player->place;
+        place->SyncPosition();
+        Native::Log("hop: the player from (%.1f, %.1f, %.1f) in %s to (%.1f, %.1f, %.1f), the link to %s", place->position.x,
+                    place->position.y, place->position.z, name.c_str(), position.x, position.y, position.z, linkedName.c_str());
+        if (place->MoveTo(&position))
+        {
+            QueueObject(player);
+        }
+
+        lastHop = now;
+        return;
+    }
+
+    // Not linked yet (a link whose chunk isn't loaded has no name): the player taken near the wall of each such link in turn,
+    // three units in front of it (out of its reach), where the chunk loads
+    static u32 approach = 0;
+    u32 index = 0;
+    u32 count = 0;
+    for (ChunkLinkData* link = chunk->links; link != nullptr; link = link->next)
+    {
+        count += link->loadWall != nullptr && (link->linkedData == nullptr || link->linkedData->name.string == nullptr) ? 1 : 0;
+    }
+
+    for (ChunkLinkData* link = chunk->links; link != nullptr && count != 0; link = link->next)
+    {
+        if (link->loadWall == nullptr || (link->linkedData != nullptr && link->linkedData->name.string != nullptr) ||
+            index++ != approach % count)
+        {
+            continue;
+        }
+
+        const LoadWall* wall = link->loadWall;
+        Vector4 position = {0.0f, 0.0f, 0.0f, 1.0f};
+        for (const Vector4& corner : wall->corners)
+        {
+            position.x += corner.x * 0.25f;
+            position.y += corner.y * 0.25f;
+            position.z += corner.z * 0.25f;
+        }
+
+        position.x += wall->plane.x * 3.0f;
+        position.y += wall->plane.y * 3.0f;
+        position.z += wall->plane.z * 3.0f;
+        Native::Log("hop: the player near an unloaded link of %s, at (%.1f, %.1f, %.1f)", name.c_str(), position.x, position.y,
+                    position.z);
+        ObjectPlace* place = player->place;
+        place->SyncPosition();
+        if (place->MoveTo(&position))
+        {
+            QueueObject(player);
+        }
+
+        approach++;
+        lastHop = now;
+        return;
+    }
+}
+
+// The player put at a position (the tests' tools), as the game's warps put an instance
+void PutPlayer(InstanceContext* player, const Vector4& position)
+{
+    ObjectPlace* place = player->place;
+    place->SyncPosition();
+    if (place->MoveTo(&position))
+    {
+        QueueObject(player);
+    }
+}
+
+// $TWIN_TRIGGER_PLAN=list or a list of steps (5,die,5): the message triggers of the player's chunk listed once play starts in
+// it (by position: their index, place and box), then a step every 8 s: a number puts the player in that trigger, "die" drops
+// it 200 units below where it is (it falls to its death). The game's states are the sweep's log
+void TriggerPlanFrame()
+{
+    static const char* plan = std::getenv("TWIN_TRIGGER_PLAN");
+    static std::vector<std::string> steps;
+    static size_t next = 0;
+    static std::string listedChunk;
+    static std::vector<InstanceContext*> triggers;
+    static Clock::time_point lastStep = Clock::now();
+    if (plan == nullptr || G_GameController == nullptr || G_GameController->State() != GameController::StatePlaying ||
+        g_PlayerInstance == nullptr || g_PlayerInstance->object == nullptr)
+    {
+        return;
+    }
+
+    auto* player = static_cast<InstanceContext*>(g_PlayerInstance->object);
+    ChunkData* chunk = player->chunk;
+    if (chunk == nullptr || chunk->name.string == nullptr)
+    {
+        return;
+    }
+
+    // The plan's deaths never end the game
+    G_GameController->progress.counts.lives = 50;
+    if (steps.empty())
+    {
+        std::string list = plan;
+        for (size_t start = 0; start <= list.size();)
+        {
+            size_t comma = list.find(',', start);
+            comma = comma == std::string::npos ? list.size() : comma;
+            if (comma > start)
+            {
+                steps.push_back(list.substr(start, comma - start));
+            }
+            start = comma + 1;
+        }
+    }
+
+    if (listedChunk != chunk->name.string)
+    {
+        listedChunk = chunk->name.string;
+        struct Found
+        {
+            ChunkData* chunk;
+            std::vector<InstanceContext*>* triggers;
+        } found = {chunk, &triggers};
+        triggers.clear();
+        ForEachLiveInstance(
+            [](InstanceContext* instance, void* user)
+            {
+                auto* f = static_cast<Found*>(user);
+                if (instance->chunk == f->chunk && instance->place != nullptr &&
+                    GetGameNode(&instance->nodes, NodeMessageTrigger) != nullptr)
+                {
+                    f->triggers->push_back(instance);
+                }
+            },
+            &found);
+        for (InstanceContext* trigger : triggers)
+        {
+            trigger->place->SyncPosition();
+        }
+
+        std::sort(triggers.begin(), triggers.end(),
+                  [](const InstanceContext* a, const InstanceContext* b)
+                  {
+                      const Vector4& p = a->place->position;
+                      const Vector4& q = b->place->position;
+                      return p.x != q.x ? p.x < q.x : p.z != q.z ? p.z < q.z : p.y < q.y;
+                  });
+        player->place->SyncPosition();
+        Native::Log("triggers: %zu in %s, the player at (%.1f, %.1f, %.1f)", triggers.size(), listedChunk.c_str(),
+                    player->place->position.x, player->place->position.y, player->place->position.z);
+        for (size_t i = 0; i < triggers.size(); i++)
+        {
+            const Vector4& p = triggers[i]->place->position;
+            const Box& box = triggers[i]->collision.box;
+            Native::Log("triggers: %zu at (%.1f, %.1f, %.1f), box (%.1f, %.1f, %.1f)-(%.1f, %.1f, %.1f)", i, p.x, p.y, p.z, box.min.x,
+                        box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
+        }
+    }
+
+    Clock::time_point now = Clock::now();
+    if (next >= steps.size() || now - lastStep < std::chrono::seconds(8))
+    {
+        return;
+    }
+
+    lastStep = now;
+    const std::string& step = steps[next++];
+    player->place->SyncPosition();
+    Vector4 position = player->place->position;
+    if (step == "die")
+    {
+        position.y -= 200.0f;
+        Native::Log("triggers: step %s: the player dropped from (%.1f, %.1f, %.1f)", step.c_str(), player->place->position.x,
+                    player->place->position.y, player->place->position.z);
+        PutPlayer(player, position);
+        return;
+    }
+
+    size_t index = static_cast<size_t>(std::atoi(step.c_str()));
+    if (step == "list" || index >= triggers.size())
+    {
+        return;
+    }
+
+    triggers[index]->place->SyncPosition();
+    position = triggers[index]->place->position;
+    position.w = 1.0f;
+    Native::Log("triggers: step %s: the player into trigger %zu at (%.1f, %.1f, %.1f)", step.c_str(), index, position.x, position.y,
+                position.z);
+    PutPlayer(player, position);
 }
 
 [[noreturn]] void Finish(int status, const char* why)
@@ -104,6 +393,20 @@ void SweepFrame(bool fromPads)
     if (controller == nullptr)
     {
         return;
+    }
+
+    if (!fromPads)
+    {
+        HopFrame();
+        TriggerPlanFrame();
+        // $TWIN_TEST_HANG=SECONDS: the game's thread stopped that long once play starts (the hang watch's test)
+        static const char* hang = std::getenv("TWIN_TEST_HANG");
+        static bool hung = false;
+        if (hang != nullptr && !hung && controller->State() == GameController::StatePlaying)
+        {
+            hung = true;
+            std::this_thread::sleep_for(std::chrono::seconds(std::atoi(hang)));
+        }
     }
 
     // Called from the game controller's update and the pads' read (pads.cpp), both every frame while the game plays: the time
@@ -239,6 +542,13 @@ void SweepInput(BoundPad* pad)
         t = std::chrono::duration<f32>(Clock::now() - began).count();
     }
     else if (!SweepActive() || !g_Playing)
+    {
+        return;
+    }
+
+    // $TWIN_SWEEP_IDLE: no scripted input (the cutscenes play out, nothing is skipped)
+    static const bool idle = std::getenv("TWIN_SWEEP_IDLE") != nullptr;
+    if (idle)
     {
         return;
     }

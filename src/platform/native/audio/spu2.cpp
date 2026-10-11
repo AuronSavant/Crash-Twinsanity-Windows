@@ -856,6 +856,8 @@ Stereo MixCore(Core& core, const VoiceMix& voices, Stereo input, Stereo external
     return {dry.left + ApplyVolume(reverb.left, core.effectLeft), dry.right + ApplyVolume(reverb.right, core.effectRight)};
 }
 
+Spu2::KeyOnObserver g_KeyOnObserver = nullptr;
+
 void StartVoices(Core& core, u32 bits)
 {
     core.endx &= ~bits;
@@ -864,6 +866,10 @@ void StartVoices(Core& core, u32 bits)
         if ((bits >> index & 1) != 0)
         {
             core.voices[index].Start();
+            if (g_KeyOnObserver != nullptr)
+            {
+                g_KeyOnObserver(core.index * 24 + index, core.voices[index].startAddress);
+            }
         }
     }
 }
@@ -1374,6 +1380,11 @@ void ResetCore(Core& core, s32 index)
         voice.loopAddress = 0x2800;
     }
 }
+}
+
+void Spu2::SetKeyOnObserver(KeyOnObserver observer)
+{
+    g_KeyOnObserver = observer;
 }
 
 void Spu2::SetVoiceGain(s32 voice, s32 gain)

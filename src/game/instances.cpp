@@ -385,6 +385,14 @@ void ForgetFreedInstance(InstanceContext** instance)
         *instance = nullptr;
     }
 }
+
+void ForEachLiveInstance(void (*visit)(InstanceContext* instance, void* user), void* user)
+{
+    for (const InstanceContext* instance : LiveInstances())
+    {
+        visit(const_cast<InstanceContext*>(instance), user);
+    }
+}
 #endif
 
 InstanceContext* InstanceContext::Construct(InstanceContext* instance)

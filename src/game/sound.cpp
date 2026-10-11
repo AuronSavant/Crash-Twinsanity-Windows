@@ -18,6 +18,12 @@
 #include "platform/audio.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "native.h"
+
+#include <cstdlib>
+#endif
+
 // The sound code's side of the sound processor: voices, reverbs, groups and music
 namespace
 {
@@ -183,6 +189,16 @@ void ApplyGroupVolumes()
 
 void PlayOnVoice(SoundVoice* voice, GameSound* sound, u32 group, s32 last)
 {
+#ifdef TWIN_NATIVE
+    // $TWIN_SOUND_CHECK: each sound the game plays, its pitch (the sound's own, the scale asked for, what's sent) and volumes
+    static const bool check = std::getenv("TWIN_SOUND_CHECK") != nullptr;
+    if (check)
+    {
+        Native::Log("sound check: play %#x on voice %d: base pitch %#x scale %.3f pitch %#x (%d) left %d right %d group %#x",
+                    sound->soundId, VoiceNumber(voice), sound->basePitch, voice->pitchScale, voice->pitch & 0xFFFF, voice->pitch,
+                    voice->left, voice->right, group);
+    }
+#endif
     Platform::Audio::PlaySound(sound->soundId, static_cast<u32>(VoiceNumber(voice)) | group, static_cast<s16>(voice->left),
                                static_cast<s16>(voice->right), static_cast<u16>(voice->pitch), sound->parameter1,
                                SoundHighByte, static_cast<u32>(last == -1 ? 1 : last));

@@ -422,6 +422,29 @@ bool Native::Disc::Open(const char* path)
     return true;
 }
 
+void Native::Disc::Close()
+{
+    std::lock_guard lock(g_Lock);
+#if defined(_WIN32)
+    if (g_Image != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(g_Image);
+        g_Image = INVALID_HANDLE_VALUE;
+    }
+#else
+    if (g_Image >= 0)
+    {
+        ::close(g_Image);
+        g_Image = -1;
+    }
+#endif
+    g_RootSector = 0;
+    g_RootSize = 0;
+    g_ImageSize = 0;
+    g_ArchiveOffset = 0;
+    g_ArchiveModNext = 0;
+}
+
 bool Native::Disc::Find(const char* path, Entry* entry)
 {
     // The device and leading separators go ("cdrom0:\CRASH6\..." as the PS2 side would have made it)

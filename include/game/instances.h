@@ -292,6 +292,8 @@ CHECK_OFFSET(InstanceIds, count, 0x800);
 bool InstanceLive(const struct InstanceContext* instance);
 // A pointer to an instance that's gone made none
 void ForgetFreedInstance(struct InstanceContext** instance);
+// Each live instance visited (the tests' tools, native/ui/sweep.cpp)
+void ForEachLiveInstance(void (*visit)(struct InstanceContext* instance, void* user), void* user);
 #endif
 
 // An instance's context (the game's objects' instances): a referenced object with its box (a corner of the default box, its W 1),

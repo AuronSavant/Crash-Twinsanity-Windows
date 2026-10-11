@@ -17,6 +17,7 @@
 
 #include "game/renderer.h"
 #include "fixes.h"
+#include "native.h"
 
 #include <SDL3/SDL.h>
 
@@ -819,6 +820,7 @@ std::chrono::steady_clock::time_point g_GameWorkFrom;
 
 void WaitForVBlank()
 {
+    Native::GameFrameDone();
     const auto arrived = std::chrono::steady_clock::now();
     if (g_GameWorkFrom.time_since_epoch().count() != 0)
     {

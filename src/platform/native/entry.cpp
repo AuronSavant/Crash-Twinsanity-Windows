@@ -138,6 +138,8 @@ void SetUpLog()
         std::error_code ignored;
         std::filesystem::create_directories(Native::SettingsFolder(), ignored);
         std::string log = Native::SettingsFolder() + "/log.txt";
+        // The last run's log kept (a run that hung or crashed, started again)
+        std::filesystem::rename(log, Native::SettingsFolder() + "/log.previous.txt", ignored);
         std::freopen(log.c_str(), "w", stderr);
         std::freopen(log.c_str(), "a", stdout);
         std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -164,6 +166,7 @@ int main(int argc, char** argv)
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
     }
     Native::StartLowMemory();
+    Native::StartHangWatch();
     for (int i = 1; i < argc; i++)
     {
         if (std::string_view(argv[i]) == "--selftest-lowmemory")
@@ -188,7 +191,7 @@ int main(int argc, char** argv)
         }
     }
 
-    Native::LoadRetailData();
+    Native::OpenDiscImage();
     NativeApplyDataFixups();
     // $TWIN_FIXED_TIME: the test runs' time (debug.h's g_DebugFixedTime): every frame takes exactly a frame's time and reads
     // finish when asked about, so what a frame draws doesn't depend on how fast the machine is (two builds compared frame by frame)

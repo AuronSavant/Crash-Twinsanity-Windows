@@ -155,8 +155,10 @@ The checks:
 - **At build time:** the converter lays the executable's bytes out the same way and compares them with the objects it made from
   the split. The build stops on any difference.
 - **At start-up:** the executable's size and FNV-1a hash must be the PAL release's. Then the objects' hash must be the one the
-  build made. A disc image without `SLES_525.68`, another version or a changed copy is refused with a message box (the log
-  only, `--headless`). One that was remembered (`disc_image.txt`) or just picked is forgotten, so the next start asks again.
+  build made. A disc image given (`--iso`, `$TWINSANITY_ISO`, local.json) that isn't there, or is without `SLES_525.68`,
+  another version or a changed copy, is refused with a message box (the log only, `--headless`). One remembered
+  (`disc_image.txt`) or just picked is asked for again at once: a message says what's wrong ("isn't where it was" when it was
+  moved), then the file dialog, the new one remembered.
 
 Tested: the same pictures as the build with the bytes compiled in, frame for frame (35 pictures, 1 every 100 frames, from the
 start with `$TWIN_FIXED_TIME=1` and `$TWINSANITY_AUDIO=frames`); the beach, the first boss's area, the caverns' tunnel and High
@@ -191,6 +193,20 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
   picture as a PNG), two builds' pictures can be compared frame by frame; with `$TWINSANITY_AUDIO=frames` too, runs agree
   frame for frame (the sound in real time changes a run after some 700 frames).
 - `$TWIN_FRAME_STATS`: each frame's time, VU1's work, the primitives, the render thread's time and the GPU renderer's batches, texture decodes, uploads, downloads and copies.
+- The hang watch (lowmemory_win32.cpp): a thread of its own counts the game thread's frames (its waits for the vertical blank).
+  When none finishes for 20 s, it writes to the log the game's state, the game thread's stack (the thread stopped while it's
+  read) and the player's chunk, then says when the thread goes on. A hang that's ended by closing the game keeps its log: each
+  start moves the last `log.txt` to `log.previous.txt`. `$TWIN_TEST_HANG=SECONDS` stops the game thread that long once play
+  starts (its test).
+- `$TWIN_SOUND_CHECK`: every sound the game plays, logged with its pitch (the sound's own, the scale, what's sent) and volumes;
+  and its samples where the SPU2 plays them from, compared with its first play (a sound whose memory changed under it is said
+  "NOT as it first played").
+- The level sweep's tools for places it can't start in or reach: `$TWIN_HOP=cryscave,escape` takes the player through its
+  chunk's link to each of those chunks in turn, as the game's WarpToChunkLinkTowardsPlayer places an instance (half a unit in
+  front of the link's load wall, where the link takes it). `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's
+  chunk (index, place, box); a list of steps (`4,die,4`) puts the player in a trigger or drops it to its death every 8 s, the
+  lives kept up. `$TWIN_SWEEP_IDLE` gives no scripted input (cutscenes play out). `$TWIN_TEST_PICK=PATH` is the disc image
+  dialog's pick (empty: cancelled).
 
 ## Releasing
 

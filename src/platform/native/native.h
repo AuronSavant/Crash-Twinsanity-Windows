@@ -25,10 +25,10 @@ void ParseArguments(int& argc, char** argv);
 std::string SettingsFolder();
 std::string PickDiscImage();
 // The disc image (--iso, $TWINSANITY_ISO, local.json's, the one picked before, or one picked now) opened and checked to be the
-// PAL disc, once; then the retail executable's data read from its SLES_525.68 (build/native/data.cpp's NativeLoadRetailData:
-// the build has none of the game's bytes), before NativeApplyDataFixups. The program ends with a message when either fails
+// PAL disc, and the retail executable's data read from its SLES_525.68 (build/native/data.cpp's NativeLoadRetailData: the build
+// has none of the game's bytes), once, before NativeApplyDataFixups. A remembered or picked image that's gone or wrong is asked
+// for again; a given one that is ends the program with a message
 void OpenDiscImage();
-void LoadRetailData();
 // --snapshots DIR: the shown picture saved as a PNG every 2 seconds (snapshots.cpp), checked once a frame
 void SetSnapshotFolder(const char* folder);
 void SnapshotFrame();
@@ -40,6 +40,21 @@ void QuickStartFrame();
 void LocalTime(std::time_t seconds, std::tm* local);
 // An environment variable set (value) or removed (nullptr): setenv and unsetenv, _putenv_s on Windows
 void SetEnvironment(const char* name, const char* value);
+
+// The hang watch (Windows: lowmemory_win32.cpp): the game's thread's frames counted (at its wait for the vertical blank), and a
+// thread of its own that reports in the log a game thread that finishes no frame for 20 s (its state, where the player is, its
+// stack) and says when it goes on
+#if defined(_WIN32)
+void GameFrameDone();
+void StartHangWatch();
+#else
+inline void GameFrameDone()
+{
+}
+inline void StartHangWatch()
+{
+}
+#endif
 
 // The log (stderr): the platform's messages, prefixed
 void Log(const char* format, ...) __attribute__((format(printf, 1, 2)));
@@ -62,6 +77,8 @@ bool Open(const char* path);
 bool Find(const char* path, Entry* entry);
 // Reads from the image: how many bytes were read
 u32 Read(u64 offset, void* destination, u32 size);
+// Closes the image (one that turned out not to be the game's), so another can be opened
+void Close();
 // Mods (disc.cpp): a file of the archive (CRASH6\CRASH.BD's: "Levels\Earth\Hub\beach.rm2") in the settings folder's mods
 // folder at its path: its start (from the archive's) and size, past the image's end; whether an image offset is a mod's (read
 // whatever the file it was opened as says its size is)

@@ -56,6 +56,9 @@ void SetMuted(bool muted);
 
 // The voice's registers and state, for the log
 void LogVoice(s32 voice);
+// Told of each voice keyed on (0-47) with its start address (halfwords), as the key on takes effect ($TWIN_SOUND_CHECK)
+using KeyOnObserver = void (*)(s32 voice, u32 startAddress);
+void SetKeyOnObserver(KeyOnObserver observer);
 
 // One sample of output (both cores mixed, the master volume applied)
 Stereo Tick();

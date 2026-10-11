@@ -145,28 +145,38 @@ std::string Native::SettingsFolder()
 
 std::string Native::PickDiscImage()
 {
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
-    {
-        return {};
-    }
-
     struct Pick
     {
         bool done = false;
         std::string path;
     } pick;
+    // $TWIN_TEST_PICK: the tests' pick, without the dialog (empty: cancelled)
+    if (const char* test = std::getenv("TWIN_TEST_PICK"))
+    {
+        pick.path = test;
+        pick.done = true;
+    }
+    else if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+    {
+        return {};
+    }
+
     static const SDL_DialogFileFilter filters[] = {{"PS2 disc image", "iso;bin;img"}, {"Any file", "*"}};
-    SDL_ShowOpenFileDialog(
-        [](void* user, const char* const* files, int)
-        {
-            auto* result = static_cast<Pick*>(user);
-            if (files != nullptr && files[0] != nullptr)
+    if (!pick.done)
+    {
+        SDL_ShowOpenFileDialog(
+            [](void* user, const char* const* files, int)
             {
-                result->path = files[0];
-            }
-            result->done = true;
-        },
-        &pick, nullptr, filters, 2, nullptr, false);
+                auto* result = static_cast<Pick*>(user);
+                if (files != nullptr && files[0] != nullptr)
+                {
+                    result->path = files[0];
+                }
+                result->done = true;
+            },
+            &pick, nullptr, filters, 2, nullptr, false);
+    }
+
     while (!pick.done)
     {
         SDL_Event event;
@@ -238,29 +248,75 @@ namespace
 {
 std::string g_DiscImage;
 
-// A problem with the disc image, told in a message box too (unless headless) since the program has no window yet; one that was
-// remembered or picked is forgotten, so the next start asks again
-[[noreturn]] void DiscImageFatal(const char* format, ...) __attribute__((format(printf, 1, 2)));
-[[noreturn]] void DiscImageFatal(const char* format, ...)
+std::string Format(const char* format, ...) __attribute__((format(printf, 1, 2)));
+std::string Format(const char* format, ...)
 {
-    char message[1024];
+    char text[1024];
     va_list arguments;
     va_start(arguments, format);
-    std::vsnprintf(message, sizeof(message), format, arguments);
+    std::vsnprintf(text, sizeof(text), format, arguments);
     va_end(arguments);
-    if (g_DiscImageRemembered)
-    {
-        std::error_code ignored;
-        std::filesystem::remove(Native::SettingsFolder() + "/disc_image.txt", ignored);
-        std::strncat(message, "\n\nThe next start asks for the disc image again.", sizeof(message) - std::strlen(message) - 1);
-    }
+    return text;
+}
 
+// A message box (unless headless: the tests'), as the program has no window yet
+void Tell(SDL_MessageBoxFlags kind, const std::string& message)
+{
     if (!g_Settings.headless)
     {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Crash Twinsanity", message, nullptr);
+        SDL_ShowSimpleMessageBox(kind, "Crash Twinsanity", message.c_str(), nullptr);
+    }
+}
+
+[[noreturn]] void DiscImageFatal(const std::string& message)
+{
+    Tell(SDL_MESSAGEBOX_ERROR, message);
+    Native::Fatal("%s", message.c_str());
+}
+
+// The disc image opened and checked, its data laid out: "" when it's the PAL disc with the executable this build is for, else
+// what's wrong (the image closed again)
+std::string CheckDiscImage(const std::string& image)
+{
+    if (!Native::Disc::Open(image.c_str()))
+    {
+        std::error_code error;
+        if (!std::filesystem::exists(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(image.data()), image.size())), error))
+        {
+            return Format("The disc image isn't where it was: %s (moved, renamed or deleted?).", image.c_str());
+        }
+
+        return Format("%s can't be read as a disc image.", image.c_str());
     }
 
-    Native::Fatal("%s", message);
+    Native::Disc::Entry executable;
+    if (!Native::Disc::Find("SLES_525.68", &executable))
+    {
+        Native::Disc::Close();
+        return Format("%s isn't the PAL Crash Twinsanity disc (SLES-52568): there's no SLES_525.68 on it.", image.c_str());
+    }
+
+    std::vector<u8> bytes(executable.size);
+    if (Native::Disc::Read(executable.offset, bytes.data(), executable.size) != executable.size)
+    {
+        Native::Disc::Close();
+        return Format("SLES_525.68 can't be read from %s.", image.c_str());
+    }
+
+    switch (NativeLoadRetailData(bytes.data(), bytes.size()))
+    {
+    case 0:
+        return {};
+    case 1:
+        Native::Disc::Close();
+        return Format("%s is another version of Crash Twinsanity, or a changed copy: this program needs the PAL release "
+                      "(Europe/Australia, SLES-52568), whose SLES_525.68 has the SHA-1 "
+                      "d41b8d53f733f930cf03d8ea944bec24429fe57c.",
+                      image.c_str());
+    default:
+        Native::Disc::Close();
+        return Format("The game's data read from %s isn't what this program was built for.", image.c_str());
+    }
 }
 }
 
@@ -271,58 +327,51 @@ void Native::OpenDiscImage()
         return;
     }
 
-    const char* image = GetSettings().discImage;
-    if (image == nullptr)
+    // One given (--iso, $TWINSANITY_ISO, local.json) is the only one tried; one remembered or picked can be picked again: when
+    // it's gone (the image moved) or wrong, the player is told why and asked for it with the file dialog
+    const char* given = GetSettings().discImage;
+    std::string image = given != nullptr ? given : "";
+    bool askable = given == nullptr || g_DiscImageRemembered;
+    std::string problem;
+    for (;;)
     {
-        g_DiscImage = PickDiscImage();
-        g_DiscImageRemembered = !g_DiscImage.empty();
-        image = g_DiscImage.empty() ? nullptr : g_DiscImage.c_str();
-    }
+        if (image.empty())
+        {
+            if (!problem.empty())
+            {
+                Tell(SDL_MESSAGEBOX_WARNING, problem + "\n\nPick your disc image of Crash Twinsanity's PAL release (SLES-52568).");
+            }
 
-    if (image == nullptr)
-    {
-        DiscImageFatal("No disc image was chosen. Crash Twinsanity needs an image of your own PAL disc (SLES-52568): pick it "
-                       "when asked, or give --iso PATH, $TWINSANITY_ISO or local.json's \"disc_image\".");
-    }
+            image = PickDiscImage();
+            if (image.empty())
+            {
+                DiscImageFatal(problem.empty() ? "No disc image was chosen. Crash Twinsanity needs an image of your own PAL disc "
+                                                 "(SLES-52568): pick it when asked, or give --iso PATH, $TWINSANITY_ISO or "
+                                                 "local.json's \"disc_image\"."
+                                               : problem);
+            }
+        }
 
-    if (!Disc::Open(image))
-    {
-        DiscImageFatal("%s can't be read as a disc image.", image);
-    }
+        problem = CheckDiscImage(image);
+        if (problem.empty())
+        {
+            break;
+        }
 
-    Disc::Entry executable;
-    if (!Disc::Find("SLES_525.68", &executable))
-    {
-        DiscImageFatal("%s isn't the PAL Crash Twinsanity disc (SLES-52568): there's no SLES_525.68 on it.", image);
+        Log("%s", problem.c_str());
+        if (!askable)
+        {
+            DiscImageFatal(problem);
+        }
+
+        // Not remembered any more (PickDiscImage remembers the next one)
+        std::error_code ignored;
+        std::filesystem::remove(SettingsFolder() + "/disc_image.txt", ignored);
+        image.clear();
     }
 
     g_DiscImage = image;
-    Log("disc image %s", image);
-}
-
-void Native::LoadRetailData()
-{
-    OpenDiscImage();
-    Disc::Entry executable;
-    Disc::Find("SLES_525.68", &executable);
-    std::vector<u8> bytes(executable.size);
-    if (Disc::Read(executable.offset, bytes.data(), executable.size) != executable.size)
-    {
-        DiscImageFatal("SLES_525.68 can't be read from %s.", g_DiscImage.c_str());
-    }
-
-    switch (NativeLoadRetailData(bytes.data(), bytes.size()))
-    {
-    case 0:
-        return;
-    case 1:
-        DiscImageFatal("%s is another version of Crash Twinsanity, or a changed copy: this program needs the PAL release "
-                       "(Europe/Australia, SLES-52568), whose SLES_525.68 has the SHA-1 "
-                       "d41b8d53f733f930cf03d8ea944bec24429fe57c.",
-                       g_DiscImage.c_str());
-    default:
-        DiscImageFatal("The game's data read from %s isn't what this program was built for.", g_DiscImage.c_str());
-    }
+    Log("disc image %s", image.c_str());
 }
 
 // ---------------------------------------------------------------------------------------------------------- the system

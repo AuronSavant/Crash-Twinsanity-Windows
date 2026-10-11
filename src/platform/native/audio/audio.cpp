@@ -281,6 +281,73 @@ bool IsVoiceSound(u32 id)
            static_cast<const GameSound*>(voices->items[index])->soundId == id;
 }
 
+// $TWIN_SOUND_CHECK: each sound's samples where the SPU2 plays them from, compared with the first time it played (a sound whose
+// memory changed under it plays wrong). The sound a voice is asked for (PlaySound's batch), then its samples as it's keyed on
+std::mutex g_SoundCheckLock;
+u32 g_VoiceSound[48] = {};
+struct SoundSamples
+{
+    u32 address;
+    u32 blocks;
+    u64 hash;
+};
+std::unordered_map<u32, SoundSamples> g_SoundSamples;
+
+bool SoundCheck()
+{
+    static const bool check = std::getenv("TWIN_SOUND_CHECK") != nullptr;
+    return check;
+}
+
+// The samples from address (halfwords) to the first block with the end flag (at most 4096 blocks): their count and hash
+SoundSamples Samples(u32 address)
+{
+    const auto* memory = reinterpret_cast<const u16*>(Native::g_SpuMemory);
+    SoundSamples samples = {address, 0, 0xCBF29CE484222325ull};
+    for (u32 block = 0; block < 4096; block++)
+    {
+        const u16* at = memory + ((address + block * 8) & Spu2::AddressMask);
+        for (u32 i = 0; i < 8; i++)
+        {
+            samples.hash = (samples.hash ^ at[i]) * 0x100000001B3ull;
+        }
+
+        samples.blocks++;
+        if ((at[0] >> 8 & 1) != 0)
+        {
+            break;
+        }
+    }
+
+    return samples;
+}
+
+void CheckKeyOn(s32 voice, u32 address)
+{
+    std::lock_guard lock(g_SoundCheckLock);
+    u32 sound = g_VoiceSound[voice];
+    if (sound == 0)
+    {
+        return;
+    }
+
+    g_VoiceSound[voice] = 0;
+    SoundSamples now = Samples(address);
+    auto [first, added] = g_SoundSamples.try_emplace(sound, now);
+    if (added)
+    {
+        Native::Log("sound check: %#x first played on voice %d from %#x, %u blocks, hash %016llx", sound, voice, address,
+                    now.blocks, static_cast<unsigned long long>(now.hash));
+    }
+    else if (first->second.hash != now.hash || first->second.blocks != now.blocks)
+    {
+        Native::Log("sound check: %#x on voice %d from %#x, %u blocks, hash %016llx: NOT as it first played (from %#x, %u blocks, "
+                    "hash %016llx)",
+                    sound, voice, address, now.blocks, static_cast<unsigned long long>(now.hash), first->second.address,
+                    first->second.blocks, static_cast<unsigned long long>(first->second.hash));
+    }
+}
+
 // The commands that say what plays on a voice: a file opened, a stream of audio played or interleaved on, a sound played
 void Classify(const u16* batch)
 {
@@ -319,6 +386,14 @@ void Classify(const u16* batch)
         }
         case OpPlaySoundLoop:
             SetKind(words[2], IsVoiceSound(word32(words)) ? Kind::Voice : Kind::Effect);
+            if (SoundCheck())
+            {
+                static const bool observing = (Spu2::SetKeyOnObserver(CheckKeyOn), true);
+                (void)observing;
+                std::lock_guard lock(g_SoundCheckLock);
+                g_VoiceSound[words[2] % 48] = word32(words);
+            }
+
             break;
         default:
             break;

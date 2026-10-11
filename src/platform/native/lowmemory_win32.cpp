@@ -18,10 +18,12 @@
 #include "game/gamecontroller.h"
 #include "game/player.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <thread>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -523,8 +525,97 @@ LONG CALLBACK OnUnhandled(EXCEPTION_POINTERS* exception)
 }
 }
 
+namespace
+{
+std::atomic<u64> g_GameFrames{0};
+HANDLE g_GameThread = nullptr;
+
+// The game's thread's stack and the game's state, said in the log while it's stopped
+void ReportHang(u32 seconds)
+{
+    char line[256];
+    u32 state = ~0u;
+    u32 nextState = ~0u;
+    if (G_GameController != nullptr && Readable(G_GameController, sizeof(GameController)))
+    {
+        state = G_GameController->State();
+        nextState = G_GameController->NextState();
+    }
+
+    std::snprintf(line, sizeof(line),
+                  "[native] hang: the game's thread hasn't finished a frame in %u s (the game's state %u, next %u); its stack:\n",
+                  seconds, state, nextState);
+    WriteError(line);
+    if (SuspendThread(g_GameThread) == static_cast<DWORD>(-1))
+    {
+        WriteError("  (the thread couldn't be stopped to read it)\n");
+        return;
+    }
+
+    CONTEXT context = {};
+    context.ContextFlags = CONTEXT_FULL;
+    if (GetThreadContext(g_GameThread, &context))
+    {
+        WriteBacktrace(context, 48);
+    }
+
+    ResumeThread(g_GameThread);
+    WriteGameContext();
+}
+}
+
 namespace Native
 {
+void GameFrameDone()
+{
+    g_GameFrames.fetch_add(1, std::memory_order_relaxed);
+}
+
+void StartHangWatch()
+{
+    if (g_GameThread != nullptr || !DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_GameThread,
+                                                   THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0))
+    {
+        return;
+    }
+
+    std::thread(
+        []
+        {
+            constexpr u32 HangSeconds = 20;
+            u64 seen = g_GameFrames.load();
+            u32 stopped = 0;
+            bool reported = false;
+            for (;;)
+            {
+                Sleep(1000);
+                u64 frames = g_GameFrames.load();
+                // Counted from the first frame (the start-up's loading has none to count)
+                if (frames != seen || frames == 0)
+                {
+                    if (reported)
+                    {
+                        char line[96];
+                        std::snprintf(line, sizeof(line), "[native] hang: the game's thread went on after %u s\n", stopped);
+                        WriteError(line);
+                    }
+
+                    seen = frames;
+                    stopped = 0;
+                    reported = false;
+                    continue;
+                }
+
+                if (++stopped == HangSeconds && !reported)
+                {
+                    reported = true;
+                    ReportHang(stopped);
+                }
+            }
+        })
+        .detach();
+}
+
 // Loads the PS2's low memory dump when there's one, and starts emulating the retail code's low accesses
 void StartLowMemory()
 {
