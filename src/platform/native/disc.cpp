@@ -497,6 +497,11 @@ bool Native::Disc::Find(const char* path, Entry* entry)
 
     entry->offset = static_cast<u64>(sector) * SectorSize;
     entry->size = size;
+    if (Native::DetailedLog())
+    {
+        Native::Log("disc: %s (%u bytes)", path, size);
+    }
+
     return true;
 }
 

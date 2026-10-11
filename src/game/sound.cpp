@@ -192,7 +192,7 @@ void PlayOnVoice(SoundVoice* voice, GameSound* sound, u32 group, s32 last)
 #ifdef TWIN_NATIVE
     // $TWIN_SOUND_CHECK: each sound the game plays, its pitch (the sound's own, the scale asked for, what's sent) and volumes
     static const bool check = std::getenv("TWIN_SOUND_CHECK") != nullptr;
-    if (check)
+    if (check || Native::DetailedLog())
     {
         Native::Log("sound check: play %#x on voice %d: base pitch %#x scale %.3f pitch %#x (%d) left %d right %d group %#x",
                     sound->soundId, VoiceNumber(voice), sound->basePitch, voice->pitchScale, voice->pitch & 0xFFFF, voice->pitch,

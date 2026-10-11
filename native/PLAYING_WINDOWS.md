@@ -93,6 +93,11 @@ does a freeze (the game stuck for 20 seconds: where it's stuck). Each start keep
 after a freeze or a crash you can start the game again and still send it. Please include it with any bug report, with where in
 the game it happened.
 
+The log always has the time of each line, the game's states as they change (loading, playing, a cutscene, paused, a death,
+game over) with where Crash is, the area he's in, the saves written and the movies played. To report a bug you can reproduce,
+turn on **Options > Gameplay > Detailed log** first: it also writes where Crash is every 5 seconds, every sound played and every
+file read from the disc image.
+
 ## Licences
 
 The game's code here is a decompilation for preservation and study; Crash Twinsanity and its content belong to their owners.

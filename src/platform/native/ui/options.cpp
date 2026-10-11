@@ -63,6 +63,7 @@ constexpr OptionInfo Infos[OptionCount] = {
     {OptionMouseSensitivity, "mouse_sensitivity", 5, 10},
     {OptionInvertMouseY, "invert_mouse_y", 0, 1},
     {OptionLanguage, "language", 0, 5},
+    {OptionDetailedLog, "detailed_log", 0, 1},
 };
 
 s32 g_Values[OptionCount];
@@ -281,6 +282,7 @@ void CancelCapture()
 void Frame()
 {
     UiShotsFrame();
+    TrailFrame();
     SweepFrame();
     SaveTestFrame();
     SettingsShotsFrame();

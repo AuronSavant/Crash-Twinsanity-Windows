@@ -18,6 +18,7 @@
 #include "game/gamecontroller.h"
 #include "game/player.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -379,7 +380,137 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* exception)
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-// A return address as its module and offset in it
+// The executable's functions by address, from its COFF symbol table: read from its file the first time a report needs a name
+// (Windows doesn't load the table), into memory of its own (not the heap a crash may have broken). The names are as the linker
+// has them (C++'s mangled: llvm-cxxfilt reads them)
+struct FunctionSymbol
+{
+    DWORD64 address;
+    const char* name;
+};
+FunctionSymbol* g_Symbols = nullptr;
+u32 g_SymbolCount = 0;
+bool g_SymbolsRead = false;
+
+void ReadSymbols()
+{
+    g_SymbolsRead = true;
+    auto* base = reinterpret_cast<const u8*>(GetModuleHandleW(nullptr));
+    wchar_t path[MAX_PATH];
+    if (base == nullptr || GetModuleFileNameW(nullptr, path, MAX_PATH) == 0)
+    {
+        return;
+    }
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    DWORD tableAt = nt->FileHeader.PointerToSymbolTable;
+    DWORD count = nt->FileHeader.NumberOfSymbols;
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    LARGE_INTEGER fileSize = {};
+    if (tableAt == 0 || count == 0 || file == INVALID_HANDLE_VALUE || !GetFileSizeEx(file, &fileSize) ||
+        static_cast<u64>(fileSize.QuadPart) <= tableAt)
+    {
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(file);
+        }
+        return;
+    }
+
+    // The symbols (18 bytes each), then the string table to the file's end
+    auto bytes = static_cast<DWORD>(static_cast<u64>(fileSize.QuadPart) - tableAt);
+    auto* data = static_cast<u8*>(VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    // Room for every symbol, and for the short names' copies (8 bytes and a terminator)
+    g_Symbols = static_cast<FunctionSymbol*>(VirtualAlloc(nullptr, count * sizeof(FunctionSymbol), MEM_COMMIT | MEM_RESERVE,
+                                                          PAGE_READWRITE));
+    auto* shortNames = static_cast<char*>(VirtualAlloc(nullptr, count * 9, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    LARGE_INTEGER at = {};
+    at.QuadPart = tableAt;
+    DWORD read = 0;
+    bool ok = data != nullptr && g_Symbols != nullptr && shortNames != nullptr && SetFilePointerEx(file, at, nullptr, FILE_BEGIN) &&
+              ReadFile(file, data, bytes, &read, nullptr) && read == bytes && static_cast<u64>(count) * 18 < bytes;
+    CloseHandle(file);
+    if (!ok)
+    {
+        g_Symbols = nullptr;
+        return;
+    }
+
+    const char* strings = reinterpret_cast<const char*>(data + count * 18);
+    const IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(nt);
+    WORD sectionCount = nt->FileHeader.NumberOfSections;
+    for (DWORD i = 0; i < count; i++)
+    {
+        const u8* symbol = data + i * 18;
+        u32 nameWord;
+        u32 value;
+        s16 section;
+        std::memcpy(&nameWord, symbol, 4);
+        std::memcpy(&value, symbol + 8, 4);
+        std::memcpy(&section, symbol + 12, 2);
+        u8 storage = symbol[16];
+        u8 auxiliary = symbol[17];
+        // A symbol of code (in an executable section), external or static
+        if (section > 0 && section <= sectionCount && (sections[section - 1].Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0 &&
+            (storage == IMAGE_SYM_CLASS_EXTERNAL || storage == IMAGE_SYM_CLASS_STATIC))
+        {
+            const char* name;
+            if (nameWord == 0)
+            {
+                u32 offset;
+                std::memcpy(&offset, symbol + 4, 4);
+                name = strings + offset;
+            }
+            else
+            {
+                char* copy = shortNames + g_SymbolCount * 9;
+                std::memcpy(copy, symbol, 8);
+                copy[8] = '\0';
+                name = copy;
+            }
+
+            // Section names (".text") aren't functions
+            if (name[0] != '.')
+            {
+                g_Symbols[g_SymbolCount++] = {reinterpret_cast<DWORD64>(base) + sections[section - 1].VirtualAddress + value, name};
+            }
+        }
+
+        i += auxiliary;
+    }
+
+    std::sort(g_Symbols, g_Symbols + g_SymbolCount,
+              [](const FunctionSymbol& a, const FunctionSymbol& b) { return a.address < b.address; });
+}
+
+// The function of the executable's an address is in (the nearest symbol at or before it, within 1 MB), or none
+const FunctionSymbol* FunctionAt(DWORD64 address)
+{
+    if (!g_SymbolsRead)
+    {
+        ReadSymbols();
+    }
+
+    if (g_Symbols == nullptr || g_SymbolCount == 0)
+    {
+        return nullptr;
+    }
+
+    const FunctionSymbol* begin = g_Symbols;
+    const FunctionSymbol* end = begin + g_SymbolCount;
+    const FunctionSymbol* after = std::upper_bound(begin, end, address,
+                                                   [](DWORD64 value, const FunctionSymbol& symbol) { return value < symbol.address; });
+    if (after == begin)
+    {
+        return nullptr;
+    }
+
+    const FunctionSymbol* found = after - 1;
+    return address - found->address < 0x100000 ? found : nullptr;
+}
+
+// A return address as its module and offset in it, and its function's name in the executable
 void DescribeAddress(DWORD64 address, char* out, size_t size)
 {
     HMODULE module = nullptr;
@@ -395,8 +526,14 @@ void DescribeAddress(DWORD64 address, char* out, size_t size)
             std::snprintf(name, sizeof(name), "%s", slash != nullptr ? slash + 1 : path);
         }
 
-        std::snprintf(out, size, "%016llx %s+%#llx", static_cast<unsigned long long>(address), name,
-                      static_cast<unsigned long long>(address - reinterpret_cast<DWORD64>(module)));
+        int used = std::snprintf(out, size, "%016llx %s+%#llx", static_cast<unsigned long long>(address), name,
+                                 static_cast<unsigned long long>(address - reinterpret_cast<DWORD64>(module)));
+        const FunctionSymbol* function = module == GetModuleHandleW(nullptr) ? FunctionAt(address) : nullptr;
+        if (function != nullptr && used > 0 && static_cast<size_t>(used) < size)
+        {
+            std::snprintf(out + used, size - static_cast<size_t>(used), " %s+%#llx", function->name,
+                          static_cast<unsigned long long>(address - function->address));
+        }
         return;
     }
 

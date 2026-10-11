@@ -306,6 +306,7 @@ s32 Platform::MemoryCard::Write(s32 file, const void* buffer, s32 size)
 
     found->second.stream.write(static_cast<const char*>(buffer), size);
     found->second.stream.flush();
+    Native::Log("memory card: %d bytes written to %s", size, found->second.path.filename().string().c_str());
     return Finish(FunctionWrite, found->second.stream ? size : ResultFull);
 }
 

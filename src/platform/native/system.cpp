@@ -221,9 +221,11 @@ void Native::SetEnvironment(const char* name, const char* value)
 
 void Native::Log(const char* format, ...)
 {
+    static const auto started = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     va_list arguments;
     va_start(arguments, format);
-    std::fputs("[native] ", stderr);
+    std::fprintf(stderr, "[native] [%8.3f] ", seconds);
     std::vfprintf(stderr, format, arguments);
     std::fputc('\n', stderr);
     va_end(arguments);

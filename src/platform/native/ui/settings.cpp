@@ -184,6 +184,7 @@ void Build()
     gameplay.push_back(Toggle(TextFastLoading, TextDescFastLoading, OptionFastLoading));
     gameplay.push_back(Toggle(TextBugFixes, TextDescBugFixes, OptionRetailFixes));
     gameplay.push_back(Toggle(TextPauseInactive, TextDescPauseInactive, OptionPauseOnFocusLoss));
+    gameplay.push_back(Toggle(TextDetailedLog, TextDescDetailedLog, OptionDetailedLog));
 
     std::vector<Row>& display = g_Rows[TabDisplay];
     Row mode = Choice(
@@ -687,6 +688,7 @@ void ResetTab(u32 tab)
         SetOption(OptionFastLoading, 1);
         SetOption(OptionPauseOnFocusLoss, 1);
         SetOption(OptionRetailFixes, 0);
+        SetOption(OptionDetailedLog, 0);
         break;
     case TabAccessibility:
         SetOption(OptionCameraShake, 1);

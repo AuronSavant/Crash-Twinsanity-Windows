@@ -70,6 +70,7 @@ enum NativeText : u32
     TextSkipCutscenes,
     TextFastLoading,
     TextPauseInactive,
+    TextDetailedLog,
     TextRefreshRate,
     Text50Hz,
     Text60Hz,
@@ -159,6 +160,7 @@ enum NativeText : u32
     TextDescSkip,
     TextDescFastLoading,
     TextDescPauseInactive,
+    TextDescDetailedLog,
     TextDescBugFixes,
     TextDescResetDefaults,
     TextTabs,
@@ -332,11 +334,15 @@ enum Option : u32
     // The game's language (its texts, its voices, its movies' sound): the computer's (0, as the PS2 took its own), English,
     // French, German, Italian or Spanish; the game takes it when it starts (system.cpp's Platform::System::Language)
     OptionLanguage,
+    // More of what the game does written to the log (trail.cpp), for bug reports
+    OptionDetailedLog,
     OptionCount,
 };
 
 s32 GetOption(Option option);
 bool IsOn(Option option);
+// The game's trail in the log, a frame at a time (trail.cpp)
+void TrailFrame();
 // Sets an option (kept, and applied at once where it applies at once)
 void SetOption(Option option, s32 value);
 // Applies what an option changes once it's set, and every option's start-up effect (features.cpp)

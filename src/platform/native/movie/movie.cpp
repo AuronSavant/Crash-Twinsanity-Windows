@@ -337,6 +337,7 @@ void Platform::Movie::BeginPresenting(Player*, void (*present)())
 bool Platform::Movie::Open(Player* player, const char* file, u32 audioChannel, s32, void* lentMemory)
 {
     player->frames = 0;
+    Native::Log("movie: %s", file);
     auto* movie = new ::Movie;
     if (!movie->pss.Open(file, audioChannel))
     {

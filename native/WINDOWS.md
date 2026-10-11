@@ -193,6 +193,13 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
   picture as a PNG), two builds' pictures can be compared frame by frame; with `$TWINSANITY_AUDIO=frames` too, runs agree
   frame for frame (the sound in real time changes a run after some 700 frames).
 - `$TWIN_FRAME_STATS`: each frame's time, VU1's work, the primitives, the render thread's time and the GPU renderer's batches, texture decodes, uploads, downloads and copies.
+- The log: each line `[native] [SECONDS]` from the start. The game's trail (ui/trail.cpp) is always in it: the game controller's
+  states by name with the player's place (read without changing the game's), the player's chunk as it changes, the chunk a level
+  loads at, the memory card's writes and the movies opened. The detailed log (Options > Gameplay, `detailed_log` in
+  options.txt, or `$TWIN_DETAILED_LOG`) adds the player's place every 5 s of play, every sound played (game/sound.cpp, as
+  `$TWIN_SOUND_CHECK` logs them) and every file looked up on the disc. A crash's or a hang's stack names each function of the
+  executable (its COFF symbol table, read from its file when the report needs it; C++'s names mangled, `llvm-cxxfilt` reads
+  them) after its module and offset.
 - The hang watch (lowmemory_win32.cpp): a thread of its own counts the game thread's frames (its waits for the vertical blank).
   When none finishes for 20 s, it writes to the log the game's state, the game thread's stack (the thread stopped while it's
   read) and the player's chunk, then says when the thread goes on. A hang that's ended by closing the game keeps its log: each

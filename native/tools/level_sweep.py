@@ -31,7 +31,7 @@ APP = (ROOT / "build/native/cmake/CrashTwinsanity.exe" if WINDOWS else
 def symbolize(text, app):
     """Windows' crash reports give return addresses as module+offset (lowmemory_win32.cpp): the executable's ones get their
     function names and lines from llvm-symbolizer, added under each"""
-    frames = re.findall(r"^  #\d+ +[0-9a-f]+ " + re.escape(Path(app).name) + r"\+0x([0-9a-f]+)$", text, re.M)
+    frames = re.findall(r"^  #\d+ +[0-9a-f]+ " + re.escape(Path(app).name) + r"\+0x([0-9a-f]+)(?: .*)?$", text, re.M)
     if not frames:
         return text
     import shutil

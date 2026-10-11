@@ -56,7 +56,10 @@ inline void StartHangWatch()
 }
 #endif
 
-// The log (stderr): the platform's messages, prefixed
+// Whether the detailed log is on (Options > Gameplay's, or $TWIN_DETAILED_LOG): more of what the game does logged (ui/trail.cpp)
+bool DetailedLog();
+
+// The log (stderr): the platform's messages, prefixed (and the seconds since the start)
 void Log(const char* format, ...) __attribute__((format(printf, 1, 2)));
 [[noreturn]] void Fatal(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
