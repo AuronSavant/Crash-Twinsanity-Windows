@@ -480,7 +480,7 @@ extern "C"
     // The section slots whose emitters were made
     extern s32 g_ParticleSlotsMade[ParticleSectionSlots] RETAIL(D_003A14E0);
     // The render tables of unloaded systems, kept for the next ones: the pool and where its top is
-    extern u8* g_RenderTablePool[] RETAIL(D_003A07D0);
+    extern u8* g_RenderTablePool[MaxParticleSystems] RETAIL(D_003A07D0);
     extern s32 g_RenderTablePoolTop RETAIL(D_0030A84C);
     // The emitters of a slot read but not made made: their runtimes with the gravity's and emission's matrices, the timing and the
     // bounce, in the slot's chunk (the drawn chunk without one)
