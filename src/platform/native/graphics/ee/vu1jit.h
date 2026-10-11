@@ -411,6 +411,8 @@ struct Variant
     u16 offset;
     u16 label;
     u32 signature;
+    // The instruction at offset's key (EntryKey): the dispatcher's index of where programs can be entered
+    u32 entryKey;
 };
 
 // The registers and the pipelines' values a translated program keeps in its own variables, handed over at its entries and exits
@@ -432,10 +434,34 @@ struct Slots
     u32 exitSignature;
 };
 
-// A translated program: its code (checked against micro memory before it runs), its function and the places it can be entered
+// FNV-1a (64 bits) of size instructions' bytes from base in micro memory (wrapping at mask): a translated program is told by it
+// (the build keeps no copy of the microcode, vu1_translate.py's code_hash)
+inline u64 CodeHash(const u64* code, u32 mask, u32 base, u32 size)
+{
+    u64 hash = 0xCBF29CE484222325ull;
+    for (u32 n = 0; n < size; n++)
+    {
+        u64 word = code[(base + n) & mask];
+        for (u32 i = 0; i < 8; i++)
+        {
+            hash = (hash ^ ((word >> (8 * i)) & 0xFF)) * 0x100000001B3ull;
+        }
+    }
+
+    return hash;
+}
+
+// An instruction's key (its hash's top 32 bits): the index of the places programs can be entered
+inline u32 EntryKey(u64 word)
+{
+    return static_cast<u32>(CodeHash(&word, 0, 0, 1) >> 32);
+}
+
+// A translated program: its code's hash (checked against micro memory before it runs), its function and the places it can be
+// entered
 struct Program
 {
-    const u64* code;
+    u64 codeHash;
     u32 size;
     // The function: runs from a variant (its label) until an exit, with the slots' values. Returns 1 when the program ended
     // (its E bit), 0 when the run goes on at state.pc; either way the slots and slots.exitSignature are the state it left,

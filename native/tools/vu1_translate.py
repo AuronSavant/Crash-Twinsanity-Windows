@@ -32,6 +32,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vudecode import decode, imm11, FLAG_CLIP  # noqa: E402
 
+def code_hash(words):
+    """FNV-1a (64 bits) of instructions' bytes, as vu1jit.h's CodeHash: how the dispatcher tells a program in micro memory"""
+    h = 0xCBF29CE484222325
+    for word in words:
+        for i in range(8):
+            h = ((h ^ ((word >> (8 * i)) & 0xFF)) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def entry_key(word):
+    """An entry's instruction's key (vu1jit.h's EntryKey): its hash's top 32 bits"""
+    return code_hash([word]) >> 32
+
+
 VUTEXT_ADDRESS = 0x2D9D90
 VUDATA_ADDRESS = 0x2EC348
 CODE_MASK = 0x7FF
@@ -1079,20 +1093,19 @@ def generate(root, output):
     out.append('')
     out.append('namespace\n{')
     for tr in translators:
-        words = ', '.join('%#018xull' % w for w in tr.words[:tr.max_used + 1])
-        out.append('const u64 kCode%d[] = {%s};' % (tr.index, words))
+        # The microcode itself isn't kept: a program is told in micro memory by its words' hash, its entries by their word's
         out.append('const Variant kVariants%d[] = {' % tr.index)
         for vid, (o, sig) in sorted(enumerate(tr.variants), key=lambda v: (v[1][0], v[0])):
-            out.append('    {%d, %d, %d},' % (o, vid, signature_id(sig)))
+            out.append('    {%d, %d, %d, %#010x},' % (o, vid, signature_id(sig), entry_key(tr.words[o])))
         if not tr.variants:
-            out.append('    {0, 0, 0},')
+            out.append('    {0, 0, 0, 0},')
         out.append('};')
     out.append('}')
     out.append('')
     out.append('const Program g_Programs%s[] = {' % TABLE)
     for tr in translators:
-        out.append('    {kCode%d, %d, %s%d, kVariants%d, %d},' % (tr.index, tr.max_used + 1, NAME, tr.index, tr.index,
-                                                                       len(tr.variants)))
+        out.append('    {%#018xull, %d, %s%d, kVariants%d, %d},' % (code_hash(tr.words[:tr.max_used + 1]), tr.max_used + 1, NAME,
+                                                                         tr.index, tr.index, len(tr.variants)))
     out.append('};')
     out.append('const u32 g_ProgramCount%s = %d;' % (TABLE, len(translators)))
     out.append('}')

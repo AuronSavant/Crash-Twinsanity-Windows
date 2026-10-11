@@ -98,7 +98,7 @@ public:
                 if (firsts[offset] == ~0u)
                 {
                     firsts[offset] = v;
-                    entries_[program.code[offset]].push_back({p, offset});
+                    entries_[program.variants[v].entryKey].push_back({p, offset});
                 }
             }
         }
@@ -396,7 +396,7 @@ private:
     s32 Identify(Vu& vu, u32 pc)
     {
         const u64* code = vu.code();
-        auto found = entries_.find(code[pc]);
+        auto found = entries_.find(EntryKey(code[pc]));
         if (found == entries_.end())
         {
             return -1;
@@ -406,13 +406,7 @@ private:
         {
             const Program& program = t_.programs[candidate.program];
             u32 base = (pc - candidate.offset) & t_.codeMask;
-            bool same = true;
-            for (u32 n = 0; n < program.size && same; n++)
-            {
-                same = code[(base + n) & t_.codeMask] == program.code[n];
-            }
-
-            if (same)
+            if (CodeHash(code, t_.codeMask, base, program.size) == program.codeHash)
             {
                 for (u32 n = 0; n < program.size; n++)
                 {
@@ -429,7 +423,7 @@ private:
     }
 
     std::vector<std::vector<u32>> first_;
-    std::unordered_map<u64, std::vector<Candidate>> entries_;
+    std::unordered_map<u32, std::vector<Candidate>> entries_;
     const Table& t_;
     std::array<s32, 2048> owner_;
     std::array<u32, 2048> base_ = {};

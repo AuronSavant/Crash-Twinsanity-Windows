@@ -163,9 +163,14 @@ start with `$TWIN_FIXED_TIME=1` and `$TWINSANITY_AUDIO=frames`); the beach, the 
 Seas played 30 s each by the level sweep; another game's disc image and a changed `SLES_525.68` (as a mod) refused.
 
 VU1's and VU0's programs are still translated to C++ at build time (`vu1_translate.py`), from the split's copy of the microcode:
-generated code, like the decompilation's own C++, with none of the microcode's bytes kept. The interpreter that could run them
-from the microcode read at start-up instead is too slow: the beach at an unlimited frame rate ran at 15 fps interpreted
-(`$TWIN_VU1=interpret`), 70 translated.
+generated code, like the decompilation's own C++. The translation doesn't keep the microcode: the dispatcher tells which
+program micro memory holds by the FNV-1a hash of its instructions (vu1jit.h's `CodeHash`), and where it can be entered by its
+instruction's key (`EntryKey`), instead of comparing the words. The interpreter that could run the programs from the microcode
+read at start-up instead is too slow: the beach at an unlimited frame rate ran at 15 fps interpreted (`$TWIN_VU1=interpret`),
+70 translated.
+
+Checked on the program: no 32-byte block of the executable's data is in `CrashTwinsanity.exe` (of the 1407 that aren't
+repetitive); of its 16-byte blocks, two are, which are text of the program's own ("crash twinsanity", "Levels\Earth\Hub").
 
 ## Debugging
 
