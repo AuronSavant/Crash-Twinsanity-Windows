@@ -134,6 +134,25 @@ void SetMusic(s32 value)
     SetOption(OptionMusicVolume, value);
 }
 
+// The game's vibration setting (its pads' flag) and the option that gives it to the game at start-up
+void SetVibration(s32 value)
+{
+    auto* pads = static_cast<GamePadController*>(G_GamePadController);
+    if (pads != nullptr)
+    {
+        if (value != 0)
+        {
+            pads->flags.vibration = 1;
+        }
+        else
+        {
+            pads->DisableVibration();
+        }
+    }
+
+    SetOption(OptionVibration, value);
+}
+
 void OpenScreenPosition();
 void SelectTab(u32 tab);
 
@@ -160,23 +179,7 @@ void Build()
             auto* pads = static_cast<GamePadController*>(G_GamePadController);
             return pads != nullptr && pads->flags.vibration != 0 ? 1 : 0;
         },
-        [](s32 value) {
-            auto* pads = static_cast<GamePadController*>(G_GamePadController);
-            if (pads != nullptr)
-            {
-                if (value != 0)
-                {
-                    pads->flags.vibration = 1;
-                }
-                else
-                {
-                    pads->DisableVibration();
-                }
-            }
-
-            SetOption(OptionVibration, value);
-        },
-        1, [](s32 value) { return Text(value != 0 ? 1 : 0); }));
+        SetVibration, 1, [](s32 value) { return Text(value != 0 ? 1 : 0); }));
     gameplay.push_back(OptionChoice(TextGameLanguage, TextDescGameLanguage, OptionLanguage,
                                     {TextLanguageWindows, TextLanguageEnglish, TextLanguageFrench, TextLanguageGerman,
                                      TextLanguageItalian, TextLanguageSpanish}));
@@ -232,8 +235,10 @@ void Build()
     display.push_back(OptionChoice(TextFiltering, TextDescFiltering, OptionTextureFilter, {TextSharp, TextSmooth}));
     display.push_back(Toggle(TextCrt, TextDescCrt, OptionCrtFilter));
     display.push_back(Toggle(TextTexturePack, TextDescTexturePack, OptionTexturePack));
-    display.push_back(OptionChoice(TextUpscale, TextDescUpscale, OptionTextureUpscale, {0, TextScale2, TextScale4}));
-    display.push_back(OptionChoice(TextAntiAliasing, TextDescAntiAliasing, OptionAntiAliasing, {0, TextScale2, TextScale4}));
+    // (The texture upscale isn't shown until the graphics have it: NativeGraphicsSetTextureUpscale takes only off.) The
+    // anti-aliasing is FXAA on the shown picture; there's no MSAA: PCSX2 dropped its own, and the render scale is the
+    // supersampling
+    display.push_back(OptionChoice(TextAntiAliasing, TextDescAntiAliasing, OptionAntiAliasing, {0, TextFxaa}));
     display.push_back(Toggle(TextVSync, TextDescVSync, OptionVSync));
     display.push_back(Action(GameTextCentreScreen, TextDescScreenPosition, [] { OpenScreenPosition(); }));
 
@@ -658,44 +663,39 @@ std::vector<s32> VisibleIndexes()
     return indexes;
 }
 
+// Options back to their defaults (the first start's: options.cpp's table)
+void ResetOptions(std::initializer_list<Option> options)
+{
+    for (Option option : options)
+    {
+        SetOption(option, DefaultOption(option));
+    }
+}
+
+// A tab's settings back to the defaults, the same as a first start's
 void ResetTab(u32 tab)
 {
     switch (tab)
     {
     case TabDisplay:
-        SetResolution({1, 1280, 960, false});
-        g_WidescreenTv = 1;
-        SetOption(OptionWidescreen, 1);
-        SetOption(OptionUltrawide, 0);
-        SetOption(OptionTextureFilter, 1);
-        SetOption(OptionTextureUpscale, 0);
-        SetOption(OptionTexturePack, 0);
-        SetOption(OptionAntiAliasing, 0);
-        SetOption(OptionVSync, 1);
-        SetOption(OptionCrtFilter, 0);
-        SetOption(OptionRefresh60, 0);
+        SetResolution(DefaultResolution());
+        g_WidescreenTv = static_cast<u8>(DefaultOption(OptionWidescreen) != 0 ? 1 : 0);
+        ResetOptions({OptionWidescreen, OptionUltrawide, OptionRefresh60, OptionTextureFilter, OptionCrtFilter, OptionTexturePack,
+                      OptionTextureUpscale, OptionAntiAliasing, OptionVSync});
         break;
     case TabAudio:
-        SetMusic(10);
-        SetEffects(10);
-        SetOption(OptionVoiceVolume, 10);
-        SetMusicStereo(1);
-        SetOption(OptionOutputType, 1);
-        SetOption(OptionMuteInactive, 1);
+        SetMusic(DefaultOption(OptionMusicVolume));
+        SetEffects(DefaultOption(OptionEffectsVolume));
+        SetMusicStereo(static_cast<u32>(DefaultOption(OptionOutputType)));
+        ResetOptions({OptionVoiceVolume, OptionOutputType, OptionMuteInactive});
         break;
     case TabGameplay:
-        SetOption(OptionSkipCutscenes, 1);
-        SetOption(OptionFastLoading, 1);
-        SetOption(OptionPauseOnFocusLoss, 1);
-        SetOption(OptionRetailFixes, 0);
-        SetOption(OptionDetailedLog, 0);
+        SetVibration(DefaultOption(OptionVibration));
+        ResetOptions({OptionLanguage, OptionSkipCutscenes, OptionFastLoading, OptionRetailFixes, OptionPauseOnFocusLoss,
+                      OptionDetailedLog});
         break;
     case TabAccessibility:
-        SetOption(OptionCameraShake, 1);
-        SetOption(OptionInvertCameraX, 0);
-        SetOption(OptionInvertCameraY, 0);
-        SetOption(OptionCameraSpeed, 5);
-        SetOption(OptionStickDeadZone, 0);
+        ResetOptions({OptionCameraShake, OptionInvertCameraX, OptionInvertCameraY, OptionCameraSpeed, OptionStickDeadZone});
         break;
     default:
         break;

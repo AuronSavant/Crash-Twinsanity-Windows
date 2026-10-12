@@ -48,14 +48,14 @@ A controller (Xbox, PlayStation, Switch and most others) works out of the box, a
 | Action | Keys |
 | --- | --- |
 | Move | W A S D |
-| Look and turn the camera | The mouse (or the arrow keys) |
+| Look and turn the camera | The mouse (or the arrow keys, Q and E) |
 | Jump | Space |
 | Spin | Left mouse button (or J) |
 | Crouch, skid, slide | Left Shift (or K) |
 | Status | Tab (or I) |
-| Shoulders | Q / E |
+| Shoulders | Z / C |
 | Pause | Esc (or Enter) |
-| Skip a cutscene | Hold any button |
+| Skip a cutscene | Hold any button (with Options > Gameplay > Skip cutscenes on) |
 | Menus | Arrow keys (or the mouse), Enter to select, Esc to go back |
 | Fullscreen | Alt+Enter |
 
@@ -65,9 +65,14 @@ and inverted Y are there too.
 ## Options
 
 Options (from the main or pause menu) has PC settings: the language (English, French, German, Italian or Spanish texts, voices
-and movies; Windows' language by default, the new one from the game's next start), window size or fullscreen, the internal resolution, widescreen (4:3, 16:9
-or 21:9), the refresh rate, texture filtering, scanlines, texture packs, anti-aliasing, v-sync, volumes, skipping cutscenes,
-faster loading, and optional fixes of the original game's bugs (off plays exactly like the PS2).
+and movies; Windows' language by default, the new one from the game's next start), window size or fullscreen, the internal
+resolution, widescreen (4:3, 16:9 or 21:9), the refresh rate, texture filtering, scanlines, texture packs, anti-aliasing
+(FXAA), v-sync, volumes, skipping cutscenes, faster loading, and optional fixes of the original game's bugs (off plays exactly
+like the PS2).
+
+The defaults are the game as the PS2 had it, in a 1280×720 window at twice the PS2's resolution and 60 Hz: cutscenes can't be
+skipped (the PS2 game couldn't; turn **Skip cutscenes** on to hold any button through them), the original bugs are kept, and
+faster loading and pausing in the background are on. **Reset to defaults** at the bottom of each tab puts it back to these.
 
 The refresh rate is 50 Hz (the European PS2's), 60 Hz (the default), or 120 Hz, 144 Hz or unlimited for smoother play on a fast
 computer and a high refresh rate monitor (turn v-sync off for unlimited). The game runs at the same speed at any rate; above 60

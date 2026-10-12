@@ -30,9 +30,11 @@ struct OptionInfo
     s32 defaultValue;
     s32 maximum;
 };
-// Defaults: the PC conveniences on and 60 Hz (the NTSC release's rate), anything that changes the retail game's play off
+// The defaults, the first start's and the settings' reset alike (DefaultOption): the game as the PS2 had it (no skipping its
+// cutscenes, as it couldn't; its own settings' defaults), at 60 Hz (the NTSC release's rate: 50 judders on a 60 Hz display), with
+// the PC conveniences that change nothing of the game on (fast loading, pausing and muting in the background, the mouse)
 constexpr OptionInfo Infos[OptionCount] = {
-    {OptionSkipCutscenes, "skip_cutscenes", 1, 1},
+    {OptionSkipCutscenes, "skip_cutscenes", 0, 1},
     {OptionFastLoading, "fast_loading", 1, 1},
     {OptionPauseOnFocusLoss, "pause_on_focus_loss", 1, 1},
     {OptionWidescreen, "widescreen", 1, 1},
@@ -46,7 +48,7 @@ constexpr OptionInfo Infos[OptionCount] = {
     {OptionMouse, "mouse", 1, 1},
     {OptionTextureUpscale, "texture_upscale", 0, 2},
     {OptionTexturePack, "texture_pack", 1, 1},
-    {OptionAntiAliasing, "anti_aliasing", 0, 2},
+    {OptionAntiAliasing, "anti_aliasing", 0, 1},
     {OptionVSync, "vsync", 1, 1},
     {OptionMusicVolume, "music_volume", 10, 10},
     {OptionEffectsVolume, "effects_volume", 10, 10},
@@ -190,6 +192,19 @@ bool WatchEvent(void*, SDL_Event* event)
 
     return true;
 }
+}
+
+s32 DefaultOption(Option option)
+{
+    for (const OptionInfo& info : Infos)
+    {
+        if (info.option == option)
+        {
+            return info.defaultValue;
+        }
+    }
+
+    return 0;
 }
 
 s32 GetOption(Option option)

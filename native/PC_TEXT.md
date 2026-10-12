@@ -122,7 +122,7 @@ The graphic options' resolution setting (NATIVE.md) adds texts of its own after 
 | 0x14D | smooth or sharp pixels when the picture is scaled. | pixels lissés ou nets à l'agrandissement. | weiche oder scharfe pixel beim skalieren. | píxeles suaves o nítidos al escalar. | pixel morbidi o nitidi nel ridimensionamento. |
 | 0x14E | smooth the game's textures at a larger size. | textures lissées en plus grand. | texturen größer und glatter. | texturas suavizadas a mayor tamaño. | texture levigate più grandi. |
 | 0x14F | use the textures of a texture pack. | utiliser un pack de textures. | texturen eines texturpakets nutzen. | usar un pack de texturas. | usa un pacchetto di texture. |
-| 0x150 | smooth the edges of 3d objects. | lisser les bords des objets 3d. | kanten von 3d-objekten glätten. | suavizar los bordes 3d. | leviga i bordi degli oggetti 3d. |
+| 0x150 | fxaa smooths the edges on the picture. a higher resolution smooths them better. | fxaa lisse les bords de l'image. une résolution plus haute les lisse mieux. | fxaa glättet die kanten im bild. eine höhere auflösung glättet besser. | fxaa suaviza los bordes de la imagen. más resolución los suaviza mejor. | fxaa leviga i bordi dell'immagine. una risoluzione più alta li leviga meglio. |
 | 0x151 | wait for the screen's refresh: no tearing. | synchronisé à l'écran: pas de déchirure. | auf den bildschirm warten: kein tearing. | sincronizar con la pantalla: sin cortes. | sincronizza con lo schermo: niente tearing. |
 | 0x152 | the look of an old crt television. | l'aspect d'une vieille télévision. | wie ein alter röhrenfernseher. | el aspecto de una tele antigua. | l'aspetto di un vecchio televisore. |
 | 0x153 | 50 hz is the original timing. | 50 hz est la cadence d'origine. | 50 hz ist das original. | 50 hz es el ritmo original. | 50 hz è la frequenza originale. |
@@ -197,6 +197,7 @@ The graphic options' resolution setting (NATIVE.md) adds texts of its own after 
 | 0x198 | move the camera with the mouse while playing. | la souris tourne la caméra en jeu. | die maus dreht die kamera im spiel. | el ratón mueve la cámara al jugar. | il mouse muove la telecamera in gioco. |
 | 0x199 | how fast the mouse turns the camera. | la vitesse de la caméra à la souris. | wie schnell die maus die kamera dreht. | lo rápido que el ratón gira la cámara. | quanto velocemente il mouse gira la telecamera. |
 | 0x19A | moving the mouse up looks down. | souris vers le haut : la caméra baisse. | maus hoch blickt nach unten. | ratón arriba mira hacia abajo. | mouse in alto guarda in basso. |
+| 0x19B | fxaa | fxaa | fxaa | fxaa | fxaa |
 
 ## English (29 lines)
 

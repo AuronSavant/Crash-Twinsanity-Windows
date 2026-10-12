@@ -382,7 +382,8 @@ void Platform::System::Initialise()
     Native::OpenDiscImage();
     Native::LogMovieLibraries();
 
-    // The window the game is shown in (4:3 like the PS2's TV picture); the graphics make their context on it
+    // The window the game is shown in, at the defaults' size (resolution.cpp; a saved size is applied once it's there); the
+    // graphics make their context on it
     if (!Native::GetSettings().headless)
     {
         if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
@@ -390,7 +391,8 @@ void Platform::System::Initialise()
             Native::Fatal("SDL's video didn't start: %s", SDL_GetError());
         }
 
-        SDL_Window* window = SDL_CreateWindow("Crash Twinsanity", 1280, 960,
+        const NativeUi::Resolution defaults = NativeUi::DefaultResolution();
+        SDL_Window* window = SDL_CreateWindow("Crash Twinsanity", defaults.windowWidth, defaults.windowHeight,
                                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         if (window == nullptr)
         {

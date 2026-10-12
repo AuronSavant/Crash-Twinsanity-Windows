@@ -32,12 +32,11 @@ constexpr WindowSize Windows[DisplayChoices - 1] = {
 };
 static_assert(DisplayChoices - 1 == sizeof(Windows) / sizeof(Windows[0]));
 constexpr s32 FullscreenChoice = DisplayChoices - 1;
-// The platform's window at start-up (system.cpp)
-// 4x the PS2's picture by default (2560 x 2048, a Retina window's pixels): the game's menus as sharp as the options screen
-constexpr Resolution DefaultResolution = {4, 1280, 960, false};
+// The defaults (nativeui.h's DefaultResolution): the platform's window is made at their size (system.cpp)
+constexpr Resolution Defaults = {2, 1280, 720, false};
 
 bool g_Known = false;
-Resolution g_Current = DefaultResolution;
+Resolution g_Current = Defaults;
 
 std::string SettingsPath()
 {
@@ -58,7 +57,7 @@ bool ReadSaved(Resolution* resolution)
         return false;
     }
 
-    Resolution read = DefaultResolution;
+    Resolution read = Defaults;
     bool any = false;
     std::string line;
     while (std::getline(file, line))
@@ -109,6 +108,11 @@ void Save(const Resolution& resolution)
 }
 }
 
+Resolution DefaultResolution()
+{
+    return Defaults;
+}
+
 Resolution CurrentResolution()
 {
     if (!g_Known)
@@ -130,8 +134,8 @@ Resolution CurrentResolution()
                 NativeGraphicsGetResolution(&scale, &width, &height, &fullscreen);
             }
 
-            g_Current = {Clamp(scale, 1, ScaleChoices), width > 0 ? width : DefaultResolution.windowWidth,
-                         height > 0 ? height : DefaultResolution.windowHeight, fullscreen};
+            g_Current = {Clamp(scale, 1, ScaleChoices), width > 0 ? width : Defaults.windowWidth,
+                         height > 0 ? height : Defaults.windowHeight, fullscreen};
         }
 
         g_Known = true;
@@ -255,7 +259,7 @@ void ApplySavedResolution()
     Resolution saved;
     if (!ReadSaved(&saved))
     {
-        return;
+        saved = Defaults;
     }
 
     g_Current = saved;

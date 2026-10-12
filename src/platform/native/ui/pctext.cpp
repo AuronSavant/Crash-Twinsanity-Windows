@@ -546,7 +546,7 @@ const NativeTextLine g_NativeTexts[] = {
     {TextDescFiltering, {"smooth or sharp pixels when the picture is scaled.", "pixels lissés ou nets à l'agrandissement.", "weiche oder scharfe pixel beim skalieren.", "píxeles suaves o nítidos al escalar.", "pixel morbidi o nitidi nel ridimensionamento."}},
     {TextDescUpscale, {"smooth the game's textures at a larger size.", "textures lissées en plus grand.", "texturen größer und glatter.", "texturas suavizadas a mayor tamaño.", "texture levigate più grandi."}},
     {TextDescTexturePack, {"use the textures of a texture pack.", "utiliser un pack de textures.", "texturen eines texturpakets nutzen.", "usar un pack de texturas.", "usa un pacchetto di texture."}},
-    {TextDescAntiAliasing, {"smooth the edges of 3d objects.", "lisser les bords des objets 3d.", "kanten von 3d-objekten glätten.", "suavizar los bordes 3d.", "leviga i bordi degli oggetti 3d."}},
+    {TextDescAntiAliasing, {"fxaa smooths the edges on the picture. a higher resolution smooths them better.", "fxaa lisse les bords de l'image. une résolution plus haute les lisse mieux.", "fxaa glättet die kanten im bild. eine höhere auflösung glättet besser.", "fxaa suaviza los bordes de la imagen. más resolución los suaviza mejor.", "fxaa leviga i bordi dell'immagine. una risoluzione più alta li leviga meglio."}},
     {TextDescVSync, {"wait for the screen's refresh: no tearing.", "synchronisé à l'écran: pas de déchirure.", "auf den bildschirm warten: kein tearing.", "sincronizar con la pantalla: sin cortes.", "sincronizza con lo schermo: niente tearing."}},
     {TextDescCrt, {"the look of an old crt television.", "l'aspect d'une vieille télévision.", "wie ein alter röhrenfernseher.", "el aspecto de una tele antigua.", "l'aspetto di un vecchio televisore."}},
     {TextDescGameLanguage, {"texts, voices and movies. from the game's next start.", "textes, voix et films. au prochain lancement du jeu.", "texte, stimmen und filme. ab dem nächsten spielstart.", "textos, voces y vídeos. al volver a abrir el juego.", "testi, voci e filmati. dal prossimo avvio del gioco."}},
@@ -624,6 +624,7 @@ const NativeTextLine g_NativeTexts[] = {
     {TextDescMouseLook, {"move the camera with the mouse while playing.", "la souris tourne la caméra en jeu.", "die maus dreht die kamera im spiel.", "el ratón mueve la cámara al jugar.", "il mouse muove la telecamera in gioco."}},
     {TextDescMouseSensitivity, {"how fast the mouse turns the camera.", "la vitesse de la caméra à la souris.", "wie schnell die maus die kamera dreht.", "lo rápido que el ratón gira la cámara.", "quanto velocemente il mouse gira la telecamera."}},
     {TextDescInvertMouseY, {"moving the mouse up looks down.", "souris vers le haut : la caméra baisse.", "maus hoch blickt nach unten.", "ratón arriba mira hacia abajo.", "mouse in alto guarda in basso."}},
+    {TextFxaa, {"fxaa", "fxaa", "fxaa", "fxaa", "fxaa"}},
 };
 const u32 g_NativeTextCount = sizeof(g_NativeTexts) / sizeof(g_NativeTexts[0]);
 const char* const g_TextLanguages[TextLanguages] = {"English", "French", "German", "Spanish", "Italian"};

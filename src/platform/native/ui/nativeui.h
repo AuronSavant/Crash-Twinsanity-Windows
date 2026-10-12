@@ -218,6 +218,7 @@ enum NativeText : u32
     TextDescMouseLook,
     TextDescMouseSensitivity,
     TextDescInvertMouseY,
+    TextFxaa,
     NativeTextEnd,
 };
 
@@ -269,16 +270,21 @@ extern bool g_ResolutionToGraphics;
 // while the page is shown isn't snapped to a choice's size
 void NoteChoices(s32 scaleChoice, s32 displayChoice);
 bool ChoicesChanged(s32 scaleChoice, s32 displayChoice);
-// At start-up, once the window is there: the saved resolution applied (nothing when none was saved)
+// At start-up, once the window is there: the saved resolution applied, else the defaults (which aren't written: the file is made
+// by the player's own choice)
 void ApplySavedResolution();
+// The defaults, the first start's and the display settings' reset alike: 2x the PS2's picture (1280 x 1024: sharp on a modern
+// screen, light on a laptop's graphics) in a 1280 x 720 window (16:9 like the widescreen default, and it fits a 1366 x 768 laptop)
+Resolution DefaultResolution();
 
 
 // ---------------------------------------------------------------------------------------------------------- the native options
-// The native build's options (options.cpp: kept in the settings folder's options.txt). Defaults: the PC conveniences on, anything
-// that changes the retail game's play or timing off
+// The native build's options (options.cpp: kept in the settings folder's options.txt). Defaults (DefaultOption): the game as the
+// PS2 had it, at 60 Hz, with the PC conveniences that change nothing of the game on
 enum Option : u32
 {
-    // Hold triangle to skip the cutscenes that have the retail game's disabled skip; triangle stops the movies too
+    // Hold any button to skip the cutscenes that have the retail game's disabled skip (the PS2 game couldn't skip them: off by
+    // default); it stops the movies too
     OptionSkipCutscenes,
     // The disc's reads sent as soon as they're queued (the community patcher's faster level loads)
     OptionFastLoading,
@@ -305,8 +311,9 @@ enum Option : u32
     OptionController,
     // The mouse in the menus (hover selects, click picks, right click goes back)
     OptionMouse,
-    // The settings screen's display and audio settings the game doesn't keep itself (the graphics' texture upscale 0-2, texture
-    // pack, anti-aliasing 0-2, v-sync; the music and effects volumes 0-10, the output type, vibration, given to the game at start-up)
+    // The settings screen's display and audio settings the game doesn't keep itself (the graphics' texture upscale 0-2, not on
+    // the screen until the graphics have it; the texture pack; anti-aliasing 0 off or 1 FXAA; v-sync; the music and effects volumes
+    // 0-10, the output type, vibration, given to the game at start-up)
     OptionTextureUpscale,
     OptionTexturePack,
     OptionAntiAliasing,
@@ -340,6 +347,8 @@ enum Option : u32
 };
 
 s32 GetOption(Option option);
+// An option's default (options.cpp's table): the first start's value and the settings' reset's
+s32 DefaultOption(Option option);
 bool IsOn(Option option);
 // The game's trail in the log, a frame at a time (trail.cpp)
 void TrailFrame();

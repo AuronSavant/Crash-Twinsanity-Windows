@@ -191,7 +191,8 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
   (`--lines` by source line).
 - `$TWIN_FIXED_TIME=1`: the test runs' time (debug.h), every frame a frame's time: with `$TWIN_DUMP_FRAMES=FOLDER:N` (every Nth
   picture as a PNG), two builds' pictures can be compared frame by frame; with `$TWINSANITY_AUDIO=frames` too, runs agree
-  frame for frame (the sound in real time changes a run after some 700 frames).
+  frame for frame (the sound in real time changes a run after some 700 frames). The pictures are at the render scale: with no
+  `resolution.txt` in the run's settings, the default 2x (4x before version 1.0.4), so compare builds at the same scale.
 - `$TWIN_FRAME_STATS`: each frame's time, VU1's work, the primitives, the render thread's time and the GPU renderer's batches, texture decodes, uploads, downloads and copies.
 - The log: each line `[native] [SECONDS]` from the start. The game's trail (ui/trail.cpp) is always in it: the game controller's
   states by name with the player's place (read without changing the game's), the player's chunk as it changes, the chunk a level

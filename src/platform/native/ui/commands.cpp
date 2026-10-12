@@ -609,6 +609,10 @@ void TestResolution()
     Check(DisplayChoice({1, 1280, 960, false}) == TextWindow1280 - TextWindow960, "1280x960's choice");
     Check(DisplayChoice({1, 1000, 740, false}) == 0, "a window resized by hand: the nearest");
     Check(DisplayChoice({1, 1280, 960, true}) == DisplayChoices - 1, "fullscreen's choice");
+    // The defaults: 2x in a 1280 x 720 window, one of the menu's choices
+    Check(DefaultResolution().scale == 2 && !DefaultResolution().fullscreen &&
+              DisplayChoice(DefaultResolution()) == TextWindow1280Wide - TextWindow960,
+          "the defaults: 2x, a 1280x720 window");
 
     // The page's choices applied only when the player changes them
     NoteChoices(1, 2);
@@ -790,7 +794,7 @@ void TestControls()
     hold({}, clock + 0.1f);
     hold({PadSouth}, clock + 1.0f);
     Check(!any && SkipHoldProgress() < 0.0f, "skip: off, never");
-    SetOption(OptionSkipCutscenes, 1);
+    SetOption(OptionSkipCutscenes, DefaultOption(OptionSkipCutscenes));
     SkipHoldForTest(false, {}, 0.0f);
     Native::Log("ui self-test: the keyboard and mouse scheme, a gamepad stick's square, mouse look and the hold-any-button skip "
                 "checked");
