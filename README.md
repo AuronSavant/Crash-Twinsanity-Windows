@@ -23,8 +23,10 @@ Windows needs, makes it run at a steady 60 fps, and fixes the crashes found by p
 - **No download yet.** The program now reads the game's data from your own disc image when it starts, so a build has none of
   the game's files or data. A release is being prepared. Until then, build it yourself: see
   [Building on Windows](#building-on-windows).
-- **macOS and Linux:** the platform code is HAB3X's and the Windows changes are kept apart (`_WIN32`), but this fork is only
-  built and tested on Windows.
+- **Linux:** builds and plays on x86-64 (tried on Debian 13), and packs into an AppImage: see
+  [native/LINUX.md](native/LINUX.md).
+- **macOS:** the platform code is HAB3X's and the Windows changes are kept apart (`_WIN32`), but this fork isn't built or
+  tested on macOS.
 
 ## What this port adds
 
