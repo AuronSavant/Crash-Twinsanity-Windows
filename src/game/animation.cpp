@@ -17,6 +17,8 @@
 #include "platform/graphics.h"
 #include "platform/math.h"
 
+#include <cstdint>
+
 EABI_EXPORT(ScaleJoint, ScaleJoint);
 EABI_EXPORT(TranslateJoint, TranslateJoint);
 EABI_EXPORT(DoAnimation, DoAnimation);
