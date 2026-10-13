@@ -289,6 +289,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TWIN_UI_FONTS} $<TARGET_FILE_DIR:twinsanity>/fonts
         COMMAND_EXPAND_LISTS)
 endif()
+# Linux: the executable's symbols in its dynamic table, which is where glibc's backtrace_symbols finds the names for a fatal
+# signal's backtrace (native/tools/level_sweep.py reads them)
+target_link_options(twinsanity PRIVATE $<$<PLATFORM_ID:Linux>:-rdynamic>)
 if(APPLE)
     # A Mac app: "Crash Twinsanity.app", with the icon native/tools/make_icon.py makes from the game's own art when it's there
     set(ICON ${ROOT}/build/native/icon/AppIcon.icns)
