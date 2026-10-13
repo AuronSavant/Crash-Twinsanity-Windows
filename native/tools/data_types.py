@@ -12,7 +12,8 @@ import host  # noqa: E402
 FLAGS = ["-std=gnu++2c", "-fsyntax-only", "-DTWIN_NATIVE", "-Inative/include", "-Iinclude", "-fno-exceptions", "-fno-rtti",
          "-Wno-everything", "-Xclang", "-ast-dump"] + host.host_includes() + host.native_flags()
 DECL = re.compile(r"^[\s|`-]*(VarDecl|FunctionDecl|CXXMethodDecl)\s+0x[0-9a-f]+\s.*?\s(\w+)\s'([^']*)'(?::'([^']*)')?")
-LABEL = re.compile(r"^[\s|`-]*AsmLabelAttr\s+0x[0-9a-f]+\s.*\s\"([^\"]+)\"\s*$")
+# Some clang builds (Debian's 21.1) print IsLiteralLabel after the label
+LABEL = re.compile(r"^[\s|`-]*AsmLabelAttr\s+0x[0-9a-f]+\s.*\s\"([^\"]+)\"(?:\s+IsLiteralLabel)?\s*$")
 
 def scan(path):
     out = subprocess.run([host.CLANG] + FLAGS + [path], capture_output=True, text=True, cwd=HERE).stdout.splitlines()
