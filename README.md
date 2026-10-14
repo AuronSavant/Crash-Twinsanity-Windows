@@ -12,17 +12,21 @@ Windows needs, makes it run at a steady 60 fps, and fixes the crashes found by p
 > Crash Twinsanity and Crash Bandicoot are trademarks of Activision. PlayStation is a trademark of Sony Interactive
 > Entertainment. This is a fan project, not affiliated with or endorsed by either.
 
+## Download
+
+The [releases](https://github.com/GioPixelGH/Crash-Twinsanity-Windows/releases) have `Crash-Twinsanity-Windows.zip` for
+64-bit Windows 10 and 11: unzip it anywhere, run `CrashTwinsanity.exe` in the `Crash Twinsanity` folder and pick your disc
+image. They're previews until someone has played the game through to the credits. Linux has no download yet: build it
+yourself ([native/LINUX.md](native/LINUX.md)).
+
 ## Status
 
 - **Tested on Windows 11** with an NVIDIA GeForce RTX 4070 SUPER, keyboard and mouse, and an Xbox One controller.
-- **Played by hand** from the start through the first boss and into the caverns.
+- **Played by hand** from the start through the first boss and the caverns, into the Doc Amok levels.
 - **All 131 of the game's areas were tried** with scripted input for 30 seconds each, with no unexpected crash
   ([native/sweep/results_windows.md](native/sweep/results_windows.md)). 108 played (7 of them until a game over); the other
   23 can't be started on their own, because they are parts of hubs or tunnels only entered from a neighbouring area.
 - **Not done yet:** a full playthrough to the credits.
-- **No download yet.** The program now reads the game's data from your own disc image when it starts, so a build has none of
-  the game's files or data. A release is being prepared. Until then, build it yourself: see
-  [Building on Windows](#building-on-windows).
 - **Linux:** builds and plays on x86-64 (tried on Debian 13), and packs into an AppImage: see
   [native/LINUX.md](native/LINUX.md).
 - **macOS:** the platform code is HAB3X's and the Windows changes are kept apart (`_WIN32`), but this fork isn't built or
