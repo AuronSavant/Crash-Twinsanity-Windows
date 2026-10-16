@@ -41,6 +41,16 @@ def find_llvm_mingw():
     return None
 
 
+def configured_compiler():
+    """The C++ compiler the build was configured with ("" before it was)"""
+    cache = BUILD / "CMakeCache.txt"
+    if cache.exists():
+        for line in cache.read_text(errors="replace").splitlines():
+            if line.startswith("CMAKE_CXX_COMPILER:"):
+                return line.split("=", 1)[1]
+    return ""
+
+
 def find_tool(name, winget_id):
     found = shutil.which(name)
     if found:
@@ -163,10 +173,14 @@ def main():
     env["PATH"] = os.pathsep.join([str(llvm), str(Path(ninja).parent), env.get("PATH", "")])
     if args.clean and BUILD.exists():
         shutil.rmtree(BUILD)
-    if args.configure or not (BUILD / "build.ninja").exists():
-        subprocess.run([cmake, "-S", str(HERE / "native"), "-B", str(BUILD), "-G", "Ninja",
+    compiler = (llvm / "clang++.exe").as_posix()
+    # A build configured with another LLVM-MinGW is configured from scratch: its cache keeps that one's tools (the resource
+    # compiler, the archiver), and winget's upgrades delete the version before
+    fresh = configured_compiler() not in ("", compiler)
+    if args.configure or fresh or not (BUILD / "build.ninja").exists():
+        subprocess.run([cmake] + (["--fresh"] if fresh else []) + ["-S", str(HERE / "native"), "-B", str(BUILD), "-G", "Ninja",
                         f"-DCMAKE_MAKE_PROGRAM={Path(ninja).as_posix()}",
-                        f"-DCMAKE_CXX_COMPILER={(llvm / 'clang++.exe').as_posix()}",
+                        f"-DCMAKE_CXX_COMPILER={compiler}",
                         f"-DCMAKE_PREFIX_PATH={sdl.as_posix()}", f"-DTWIN_FFMPEG_DIR={ffmpeg.as_posix()}",
                         f"-DPython3_EXECUTABLE={Path(sys.executable).as_posix()}"], check=True, env=env)
     result = subprocess.run([cmake, "--build", str(BUILD), "--"] + args.ninja, env=env)
