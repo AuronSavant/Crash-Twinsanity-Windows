@@ -11,6 +11,8 @@
 #include "game/chunkdata.h"
 #include "game/gamecontroller.h"
 #include "game/instances.h"
+#include "game/objectnode.h"
+#include "game/objects.h"
 #include "game/place.h"
 #include "game/player.h"
 #include "game/reference.h"
@@ -21,6 +23,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <string>
 #include <thread>
 #include <vector>
@@ -43,6 +47,8 @@ bool g_Playing = false;
 f32 g_Played = 0.0f;
 Clock::time_point g_LastFrame;
 u32 g_Frames = 0;
+// The hops' "idle" step: no scripted input from then on (until an "input" step)
+std::atomic<bool> g_HopIdle{false};
 
 void ReadSettings()
 {
@@ -66,6 +72,68 @@ void ReadSettings()
 
     g_Start = Clock::now();
     g_LastFrame = g_Start;
+}
+
+// The name of an instance's object ("" for none)
+const char* ObjectNameOf(InstanceContext* instance)
+{
+    auto* node = static_cast<ObjectNodeBase*>(GetGameNode(&instance->nodes, NodeObject));
+    if (node == nullptr)
+    {
+        return "";
+    }
+
+    GameObject* object = node->sourceNode != nullptr ? SourceObject(node->sourceNode) : node->object;
+    return object != nullptr && object->name.string != nullptr ? object->name.string : "";
+}
+
+// The live instances of a chunk: the objects step's list, or the nearest to a place of those whose object's name holds a text
+// (any case)
+struct InstanceSearch
+{
+    ChunkData* chunk;
+    InstanceContext* player;
+    // Empty: the instances logged
+    std::string name;
+    Vector4 from;
+    InstanceContext* found;
+    f32 distance;
+};
+
+void VisitInstance(InstanceContext* instance, void* user)
+{
+    auto* search = static_cast<InstanceSearch*>(user);
+    if (instance->chunk != search->chunk || instance == search->player || instance->place == nullptr)
+    {
+        return;
+    }
+
+    std::string name = ObjectNameOf(instance);
+    ObjectPlace* place = instance->place;
+    place->SyncPosition();
+    Vector4 position = place->position;
+    if (search->name.empty())
+    {
+        Native::Log("hop:   %s at (%.1f, %.1f, %.1f)", name.c_str(), position.x, position.y, position.z);
+        return;
+    }
+
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (lower.find(search->name) == std::string::npos)
+    {
+        return;
+    }
+
+    f32 x = position.x - search->from.x;
+    f32 y = position.y - search->from.y;
+    f32 z = position.z - search->from.z;
+    f32 distance = std::sqrt(x * x + y * y + z * z);
+    if (search->found == nullptr || distance < search->distance)
+    {
+        search->found = instance;
+        search->distance = distance;
+    }
 }
 
 // $TWIN_HOP=cryscave,escape: while playing, the player taken through its chunk's link to each of those chunks in turn (the tests'
@@ -150,6 +218,84 @@ void HopFrame()
 
         next++;
         lastHop = now;
+        return;
+    }
+
+    // "objects": the live instances of the player's chunk logged, their objects' names and places
+    if (targets[next] == "objects")
+    {
+        Native::Log("hop: the instances in %s", name.c_str());
+        InstanceSearch search = {chunk, player, "", {}, nullptr, 0.0f};
+        ForEachLiveInstance(VisitInstance, &search);
+        next++;
+        lastHop = now;
+        return;
+    }
+
+    // "on:NAME" (or "on:NAME:HEIGHT"): the player put HEIGHT (2) units above the instance nearest it in its chunk whose object's
+    // name holds NAME. "bring:NAME" (or "bring:NAME:HEIGHT"): that instance put HEIGHT (0) units above the player instead (where
+    // the player can't be put: down a slide, its physics keep it on its way)
+    bool bring = targets[next].rfind("bring:", 0) == 0;
+    if (bring || targets[next].rfind("on:", 0) == 0)
+    {
+        std::string wanted = targets[next].substr(bring ? 6 : 3);
+        f32 height = bring ? 0.0f : 2.0f;
+        size_t colon = wanted.find(':');
+        if (colon != std::string::npos)
+        {
+            height = static_cast<f32>(std::atof(wanted.c_str() + colon + 1));
+            wanted.resize(colon);
+        }
+
+        std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return std::tolower(c); });
+        ObjectPlace* place = player->place;
+        place->SyncPosition();
+        InstanceSearch search = {chunk, player, wanted, place->position, nullptr, 0.0f};
+        ForEachLiveInstance(VisitInstance, &search);
+        if (search.found == nullptr)
+        {
+            Native::Log("hop: no instance of an object named like %s in %s", wanted.c_str(), name.c_str());
+        }
+        else if (bring)
+        {
+            Vector4 to = place->position;
+            to.y += height;
+            to.w = 1.0f;
+            Native::Log("hop: %s from (%.1f, %.1f, %.1f) put %.1f above the player at (%.1f, %.1f, %.1f) in %s",
+                        ObjectNameOf(search.found), search.found->place->position.x, search.found->place->position.y,
+                        search.found->place->position.z, height, to.x, to.y, to.z, name.c_str());
+            if (search.found->place->MoveTo(&to))
+            {
+                QueueObject(search.found);
+            }
+        }
+        else
+        {
+            Vector4 to = search.found->place->position;
+            to.y += height;
+            to.w = 1.0f;
+            Native::Log("hop: the player put %.1f above %s at (%.1f, %.1f, %.1f) in %s", height, ObjectNameOf(search.found),
+                        search.found->place->position.x, search.found->place->position.y, search.found->place->position.z,
+                        name.c_str());
+            if (place->MoveTo(&to))
+            {
+                QueueObject(player);
+            }
+        }
+
+        next++;
+        lastHop = now;
+        return;
+    }
+
+    // "idle", "input": the scripted input stopped (the player left to go on by itself: a slide, say) or started again
+    if (targets[next] == "idle" || targets[next] == "input")
+    {
+        g_HopIdle = targets[next] == "idle";
+        Native::Log("hop: scripted input %s at (%.1f, %.1f, %.1f) in %s", g_HopIdle ? "stopped" : "started",
+                    player->place->position.x, player->place->position.y, player->place->position.z, name.c_str());
+        next++;
+        lastHop = now - std::chrono::seconds(2);
         return;
     }
 
@@ -595,7 +741,7 @@ void SweepInput(BoundPad* pad)
 
     // $TWIN_SWEEP_IDLE: no scripted input (the cutscenes play out, nothing is skipped)
     static const bool idle = std::getenv("TWIN_SWEEP_IDLE") != nullptr;
-    if (idle)
+    if (idle || g_HopIdle)
     {
         return;
     }

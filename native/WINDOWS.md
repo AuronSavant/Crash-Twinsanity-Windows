@@ -219,11 +219,15 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
   (`$TWIN_TEST_SOUND_DELAY`: from so many seconds).
 - The level sweep's tools for places it can't start in or reach: `$TWIN_HOP=cryscave,escape` takes the player through its
   chunk's link to each of those chunks in turn, as the game's WarpToChunkLinkTowardsPlayer places an instance (half a unit in
-  front of the link's load wall, where the link takes it); a step `goto:X:Y:Z` puts the player there, `wait5` waits 5 s and
-  `die` drops it to its death. `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's
-  chunk (index, place, box); a list of steps (`4,die,4`) puts the player in a trigger or drops it to its death every 8 s, the
-  lives kept up. `$TWIN_SWEEP_IDLE` gives no scripted input (cutscenes play out). `$TWIN_TEST_PICK=PATH` is the disc image
-  dialog's pick (empty: cancelled).
+  front of the link's load wall, where the link takes it). Other steps: `goto:X:Y:Z` puts the player there; `objects` logs the
+  instances of its chunk (their objects' names and places); `on:mine` puts it 2 units above the nearest instance whose
+  object's name holds "mine" (`on:mine:5`: 5 units) and `bring:mine` puts that instance where the player is instead; `idle`
+  stops the scripted input and `input` starts it again; `wait5` waits 5 s; `die` drops it to its death. Down a slide (Slip
+  Slide Icecapades) the player's physics undo `goto` and a hop stops the slide: start at the level's start, let the scripted
+  input get through its cutscene, then `idle` lets the slide go on by itself and `bring` puts things in its way.
+  `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's chunk (index, place, box); a list of steps (`4,die,4`)
+  puts the player in a trigger or drops it to its death every 8 s, the lives kept up. `$TWIN_SWEEP_IDLE` gives no scripted
+  input (cutscenes play out). `$TWIN_TEST_PICK=PATH` is the disc image dialog's pick (empty: cancelled).
 
 ## Releasing
 
