@@ -421,7 +421,8 @@ void SetCollisionsCommand::Execute(TimeClock*, BehaviourRunner* runner, Behaviou
 
     if (settings.centerOfMassGiven)
     {
-        SetRigidBodyCenterOfMass(body, reinterpret_cast<const Vector4*>(&centerOfMassX));
+        const Vector4 centerOfMass = VectorFrom(&centerOfMassX);
+        SetRigidBodyCenterOfMass(body, &centerOfMass);
     }
 
     if (body->physicsBody == nullptr)
@@ -503,7 +504,8 @@ void ColliderLaunchNowCommand::Execute(TimeClock*, BehaviourRunner* runner, Beha
         Vector4 position = place->position;
         Vector4 target = g_DefaultBox.min;
         target.w = 1.0f;
-        LaunchTarget(launch, reinterpret_cast<const Vector4*>(&x), stepCorner, stepToward, stepScatter, runner, &target);
+        const Vector4 offset = VectorFrom(&x);
+        LaunchTarget(launch, &offset, stepCorner, stepToward, stepScatter, runner, &target);
         // Retail bug: with neither kind of throw the node gets the velocity its stack had (none here)
         Vector4 velocity = {};
         f32 gravity = body->gravity;
@@ -566,12 +568,12 @@ void LaunchAtTargetCommand::Execute(TimeClock*, BehaviourRunner* runner, Behavio
     ObjectNode* node = NodeOf(runner);
     ObjectRigidBody* body = node->rigidBody;
     MotionState* motion = node->motion;
-    const auto* offset = reinterpret_cast<const Vector4*>(&offsetX);
+    const Vector4 offset = VectorFrom(&offsetX);
     // Retail bug: with neither kind of throw the node and its physics body get the velocity the stack had (none here)
     Vector4 velocity = {};
     if (launch.velocityGiven)
     {
-        velocity = *offset;
+        velocity = offset;
         ObjectPlace* place = node->owner->place;
         RotateAndTranslate(place);
         VuRotateVector(&place->matrix, &velocity, &velocity);
@@ -584,7 +586,7 @@ void LaunchAtTargetCommand::Execute(TimeClock*, BehaviourRunner* runner, Behavio
         Vector4 position = place->position;
         Vector4 goal = g_DefaultBox.min;
         goal.w = 1.0f;
-        DesignatedPosition(&goal, launch.space, runner, launch.offsetGiven ? offset : nullptr, launch.designator, launch.receiver,
+        DesignatedPosition(&goal, launch.space, runner, launch.offsetGiven ? &offset : nullptr, launch.designator, launch.receiver,
                            0);
         f32 gravity = body->gravity;
         if (launch.thrownOverHeight)

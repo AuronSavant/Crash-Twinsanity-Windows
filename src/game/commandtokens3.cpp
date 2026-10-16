@@ -844,7 +844,7 @@ void PositionWarpCommand::ParseTokens(const ScriptTokenList* tokens)
     target.designator = DesignatesNone;
     target.unused20 = 0;
     target.offsetGiven = 0;
-    *reinterpret_cast<Vector4*>(&offsetX) = g_DefaultBox.min;
+    VectorTo(&offsetX, g_DefaultBox.min);
     offsetW = 1.0f;
     reader.First();
     while (!reader.AtEnd())
@@ -1021,7 +1021,9 @@ void RotationWarpCommand::ParseTokens(const ScriptTokenList* tokens)
         AngleFrom(&x, angleX, AngleDegrees);
         AngleFrom(&y, angleY, AngleDegrees);
         AngleFrom(&z, angleZ, AngleDegrees);
-        GetRotationXYZ(reinterpret_cast<Vector4*>(&quatX), &x, &y, &z);
+        Vector4 rotation = VectorFrom(&quatX);
+        GetRotationXYZ(&rotation, &x, &y, &z);
+        VectorTo(&quatX, rotation);
     }
     else
     {
@@ -1073,7 +1075,7 @@ void WarpAgentCommand::ParseTokens(const ScriptTokenList* tokens)
     warp.designator = DesignatesNone;
     warp.unused20 = 0;
     warp.offsetGiven = 0;
-    *reinterpret_cast<Vector4*>(&offsetX) = g_DefaultBox.min;
+    VectorTo(&offsetX, g_DefaultBox.min);
     offsetW = 1.0f;
     reader.First();
     while (!reader.AtEnd())
@@ -1259,7 +1261,9 @@ void RotateAgentCommand::ParseTokens(const ScriptTokenList* tokens)
         AngleFrom(&x, angleX, AngleDegrees);
         AngleFrom(&y, angleY, AngleDegrees);
         AngleFrom(&z, angleZ, AngleDegrees);
-        GetRotationXYZ(reinterpret_cast<Vector4*>(&quatX), &x, &y, &z);
+        Vector4 rotation = VectorFrom(&quatX);
+        GetRotationXYZ(&rotation, &x, &y, &z);
+        VectorTo(&quatX, rotation);
     }
     else
     {

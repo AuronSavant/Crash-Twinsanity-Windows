@@ -14,6 +14,27 @@ struct alignas(16) Vector4
 };
 CHECK_SIZE(Vector4, 0x10);
 
+// Four floats in a row as a vector, and a vector into four floats. Natively a script command's four floats sit 12 bytes past a
+// 16 byte boundary (0x1C or 0x2C: its vtable's pointer is 8 bytes), where reading them as a Vector4 (x86-64's aligned loads)
+// faults: these copy them a float at a time
+inline Vector4 VectorFrom(const f32* x)
+{
+    Vector4 vector;
+    vector.x = x[0];
+    vector.y = x[1];
+    vector.z = x[2];
+    vector.w = x[3];
+    return vector;
+}
+
+inline void VectorTo(f32* x, const Vector4& vector)
+{
+    x[0] = vector.x;
+    x[1] = vector.y;
+    x[2] = vector.z;
+    x[3] = vector.w;
+}
+
 struct Vector2
 {
     f32 x;

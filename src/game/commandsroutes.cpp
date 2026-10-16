@@ -298,7 +298,8 @@ void RequestFocusCommand::Execute(TimeClock*, BehaviourRunner* runner, Behaviour
     ChunkData* chunk = owner->chunk;
     Vector4 sphere = {0.0f, 0.0f, 0.0f, 1.0f};
     u32 receiver = target.receiver == RequestTarget::NoReceiver ? DesignatesNone : target.receiver;
-    const auto* offset = target.offsetGiven ? reinterpret_cast<const Vector4*>(&offsetX) : nullptr;
+    const Vector4 offsetValue = VectorFrom(&offsetX);
+    const Vector4* offset = target.offsetGiven ? &offsetValue : nullptr;
     DesignatedPosition(&sphere, target.space, runner, offset, target.designator, receiver, target.unused21);
     u32 wanted = choice.ignoresSignals ? 0 : ReferencedObjectFlags::ReceivesTriggerSignals;
     u32 unwanted = ReferencedObjectFlags::Asleep;
@@ -755,7 +756,8 @@ void GetShortRouteCommand::Execute(TimeClock*, BehaviourRunner* runner, Behaviou
     }
 
     Vector4 end;
-    const auto* offset = target.offsetGiven ? reinterpret_cast<const Vector4*>(&offsetX) : nullptr;
+    const Vector4 offsetValue = VectorFrom(&offsetX);
+    const Vector4* offset = target.offsetGiven ? &offsetValue : nullptr;
     DesignatedPosition(&end, target.space, runner, offset, target.designator, target.receiver, 0);
     u16 startIndex;
     AiPosition* from = NearestWithFlags(chunk, &start, &startIndex, positionFlags.startRequired, startFlags.startRuledOut);

@@ -669,9 +669,8 @@ void LaunchAtTargetCommand::ParseTokens(const ScriptTokenList* tokens)
 
 void ApplyImpulseCommand::ParseTokens(const ScriptTokenList* tokens)
 {
-    Vector4* impulse = reinterpret_cast<Vector4*>(&impulseX);
-    *impulse = g_DefaultBox.min;
-    impulse->w = 1.0f;
+    VectorTo(&impulseX, g_DefaultBox.min);
+    impulseW = 1.0f;
     ScriptTokenReader reader;
     ScriptTokenReader::Construct(&reader, tokens);
     reader.First();

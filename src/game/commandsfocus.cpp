@@ -217,12 +217,6 @@ InstanceContext* ReceiverInstance(BehaviourRunner* runner, u8 index)
     return runner->receivers->instances[index];
 }
 
-// The vector of a command's four floats
-const Vector4* VectorAt(const f32* x)
-{
-    return reinterpret_cast<const Vector4*>(x);
-}
-
 // The instance turned about y by an angle a second times the frame's seconds
 void TurnBy(BehaviourRunner* runner, const TaggedValue* turnRate, bool left)
 {
@@ -728,7 +722,8 @@ void SetFocusPositionCommand::Execute(TimeClock*, BehaviourRunner* runner, Behav
         }
         else
         {
-            const Vector4* offset = target.offsetGiven ? VectorAt(&offsetX) : nullptr;
+            const Vector4 offsetValue = VectorFrom(&offsetX);
+            const Vector4* offset = target.offsetGiven ? &offsetValue : nullptr;
             DesignatedPosition(&position, target.space, runner, offset, designator, target.receiver, target.unused20);
         }
 
@@ -1329,7 +1324,8 @@ void PositionWarpCommand::Execute(TimeClock*, BehaviourRunner* runner, Behaviour
     }
     else
     {
-        const Vector4* offset = target.offsetGiven ? VectorAt(&offsetX) : nullptr;
+        const Vector4 offsetValue = VectorFrom(&offsetX);
+        const Vector4* offset = target.offsetGiven ? &offsetValue : nullptr;
         DesignatedPosition(&position, target.space, runner, offset, target.designator, target.receiver, target.unused20);
     }
 
@@ -1358,7 +1354,8 @@ void WarpAgentCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLev
     }
     else
     {
-        const Vector4* offset = warp.offsetGiven ? VectorAt(&offsetX) : nullptr;
+        const Vector4 offsetValue = VectorFrom(&offsetX);
+        const Vector4* offset = warp.offsetGiven ? &offsetValue : nullptr;
         DesignatedPosition(&position, warp.space, runner, offset, warp.designator, warp.receiver, warp.unused20);
     }
 

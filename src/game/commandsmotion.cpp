@@ -129,12 +129,6 @@ Vector4 PositionOf(const InstanceContext* instance)
     return place->position;
 }
 
-// The vector of a command's four floats
-const Vector4* VectorAt(const f32* x)
-{
-    return reinterpret_cast<const Vector4*>(x);
-}
-
 // The seconds since the node's last update (none before its first)
 f32 SecondsSinceUpdate(const GameNode* node, const TimeClock* clock)
 {
@@ -342,7 +336,8 @@ Vector4 ShapeOffset(const TaggedValue& x, const TaggedValue& y, const TaggedValu
 void RotationWarpCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLevel*)
 {
     ObjectNode* node = NodeOf(runner);
-    TurnInSpace(node, node->owner, warp, VectorAt(&quatX));
+    const Vector4 turn = VectorFrom(&quatX);
+    TurnInSpace(node, node->owner, warp, &turn);
 }
 
 // A designator's instance (DesignatesNone the agent's own) turned like RotationWarp turns the agent's, in the spaces of its own
@@ -363,7 +358,8 @@ void RotateAgentCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourL
         }
     }
 
-    TurnInSpace(node, instance, warp, VectorAt(&quatX));
+    const Vector4 turn = VectorFrom(&quatX);
+    TurnInSpace(node, instance, warp, &turn);
 }
 
 // The instance moved at a speed (for the time since its node's last update) along an axis, as far as the way to a designator's
@@ -1046,7 +1042,8 @@ void SpawnResidentAgentCommand::Execute(TimeClock*, BehaviourRunner* runner, Beh
         }
 
         Vector4 position;
-        const Vector4* offset = flags.offsetGiven ? VectorAt(&offsetX) : nullptr;
+        const Vector4 offsetValue = VectorFrom(&offsetX);
+        const Vector4* offset = flags.offsetGiven ? &offsetValue : nullptr;
         if (exitPoint == GameOGI::NoExitPoint)
         {
             DesignatedPosition(&position, space, runner, offset, designator, DesignatesNone, 0);
