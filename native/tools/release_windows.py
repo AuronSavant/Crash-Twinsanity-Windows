@@ -150,7 +150,12 @@ def check(arguments):
                if not (line.startswith("?? ") and line[3:].startswith("native/tools/"))]
     if changes:
         sys.exit("The clone has changes of its own (a release is built from the repository as it is): " + changes[0])
+    before = git("rev-parse", "HEAD")
     git("pull", "--ff-only")
+    if git("rev-parse", "HEAD") != before:
+        # Run again as the pulled commit has the scripts: this one and the modules it imported (check_windows.py's scenarios)
+        # are the clone's from before the pull
+        sys.exit(subprocess.run([sys.executable] + sys.argv).returncode)
     commit = git("rev-parse", "HEAD")
     print(f"commit          {commit[:7]} {git('log', '-1', '--format=%s')}")
     WORK.mkdir(parents=True, exist_ok=True)
