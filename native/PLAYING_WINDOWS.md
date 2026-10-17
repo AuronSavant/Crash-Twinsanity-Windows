@@ -111,4 +111,4 @@ just the MPEG-2 video decoder, its source https://ffmpeg.org/releases/ffmpeg-9.0
 are separate files you can replace with your own build of FFmpeg 9.x), the fonts Luckiest Guy (Apache 2.0) and Fredoka (SIL Open
 Font Licence) and stb_truetype (public domain / MIT); their licences are in the `licenses` folder, with the port's own
 (`Crash-Twinsanity-Windows-LICENSE.txt`: MIT for the Windows port's changes; the decompilation and the Mac port it's built on
-keep their authors' rights). The icon is the game's cover art, © Activision.
+keep their authors' rights). The icon is the port's own drawing.

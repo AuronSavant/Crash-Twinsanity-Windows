@@ -1,7 +1,7 @@
 This licence covers what this repository adds to the code it imports: the changes and files of every commit after the first
 ("Import HAB3X/Crash-Twinsanity-Mac at 7dbfd2d"). It doesn't cover the imported code (Smartkin's decompilation of Crash
 Twinsanity and HAB3X's Mac port, published without a licence: their authors keep their rights), the third-party libraries and
-fonts (each under its own licence, see README.md), or the game and its cover art (Activision's).
+fonts (each under its own licence, see README.md), or the game (Activision's).
 
 MIT License
 

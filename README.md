@@ -163,7 +163,7 @@ repository shipped isn't included here: get it from its author.
 | [Luckiest Guy](https://fonts.google.com/specimen/Luckiest+Guy) | Apache 2.0 |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) | SIL Open Font Licence 1.1 |
 
-**The icon** is the game's European cover art, © Activision.
+**The icon** is our own drawing (`native/tools/draw_icon.py` draws it), under this repository's licence.
 
 **AI assistance:** this port was written with the help of [Claude Code](https://claude.com/claude-code) (Anthropic). As the
 developer, I reviewed and supervised the work. Each commit made with it says so.
@@ -174,5 +174,5 @@ developer, I reviewed and supervised the work. Each commit made with it says so.
   with their authors. They are included here, unchanged in the first commit, with the credit above.
 - **This repository's own changes** (the commits after the first) are under the MIT licence: see [LICENSE](LICENSE).
 - **Third-party libraries and fonts** keep their own licences (table above).
-- **The game** (its code, data, art, sound and the cover art) belongs to Activision. None of the game's files are in this
-  repository: the executable, data, art and sound come from your own disc image. The icon is its cover art.
+- **The game** (its code, data, art and sound) belongs to Activision. None of the game's files are in this repository:
+  the executable, data, art and sound come from your own disc image.

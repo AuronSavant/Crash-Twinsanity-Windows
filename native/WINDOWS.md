@@ -259,8 +259,10 @@ it back and compares its SHA-256: only with the commit and the zip `check` check
 token is git's (`git credential fill`), never printed or kept.
 
 `package_windows.py` makes `build/native/dist/Crash Twinsanity/` and `Crash-Twinsanity-Windows.zip`: the program, the
-DLLs, the fonts, the licences and native/PLAYING_WINDOWS.md as README.txt. The program's icon is native/icon/AppIcon.ico (the box
-art, 16 to 256 pixels; `native/tools/make_icon.py` still makes one from the HUD's Crash head for the Mac build).
+DLLs, the fonts, the licences and native/PLAYING_WINDOWS.md as README.txt. The program's icon is native/icon/AppIcon.ico
+(16 to 256 pixels), our own drawing: two spiral eyes on an orange tile, drawn from shapes alone by `native/tools/draw_icon.py`
+(`--preview sheet.png` shows every size; under 64 pixels the spirals become pupils). CMake rebuilds the resource when the icon
+changes. `native/tools/make_icon.py` still makes one from the HUD's Crash head for the Mac build.
 
 The zip has none of the game's files or data: the program reads the retail executable's data from the player's disc image
 when it starts ("The game's data from the disc", above). It has the decompilation's C++ and the VU programs' translation,
