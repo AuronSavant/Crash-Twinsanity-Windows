@@ -174,6 +174,18 @@ read at start-up instead is too slow: the beach at an unlimited frame rate ran a
 
 Checked on the program: no 32-byte block of the executable's data is in `CrashTwinsanity.exe` (of the 1407 that aren't
 repetitive); of its 16-byte blocks, two are, which are text of the program's own ("crash twinsanity", "Levels\Earth\Hub").
+`release_windows.py check` checks it again for every release ("Releasing").
+
+## Checking a change
+
+    .venv\Scripts\python.exe native\tools\check_windows.py [--build] [--sweep]
+
+A line a check, the logs and pictures in `build/native/check/`, exit 1 when one fails: the four self-tests; the places that
+once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles); the beach's first 2,500 frames at a fixed time, every
+100th picture compared byte for byte with the last packaged build's (`build/native/dist/`, or `--reference PROGRAM`); with
+`--sweep`, every level chunk, its outcome against `native/sweep/results_windows.json` (a run that went on and one that ended
+in a game over count alike: the scripted input decides which). Some 3 minutes, 25 more with the sweep. Each run has a
+settings folder of its own; the disc image is local.json's.
 
 ## Debugging
 
@@ -231,8 +243,20 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
 
 ## Releasing
 
-    .venv\Scripts\python.exe native\tools\build_windows.py --configure
-    .venv\Scripts\python.exe native\tools\package_windows.py
+In a clone of the public repository with no changes of its own (a new script in native/tools aside):
+
+    .venv\Scripts\python.exe native\tools\release_windows.py check [--sweep]
+    .venv\Scripts\python.exe native\tools\release_windows.py publish NOTES.md
+
+`check` pulls, builds afresh (`build_windows.py --configure`), packages (`package_windows.py`) and checks the zip, unpacked:
+the program's version against native/CMakeLists.txt's; the DLLs it imports (Windows', SDL's and FFmpeg's only); its files
+against the last release's; check_windows.py's checks, with the pictures compared with the last release's program; and that
+the program has no 32-byte block of the game executable's data or VU microcode the last release's didn't (version 1.0.5 has
+23 of the 3,832 that aren't repetitive, none of the microcode: runs of small integers, the standard library's tables, powers
+of ten and digits, and file names the decompilation's C++ spells out). It prints the commit and the zip's SHA-256. `publish`
+makes the release (`vVERSION`, a preview) from NOTES.md with `{commit}` and `{sha256}` filled in, uploads the zip, downloads
+it back and compares its SHA-256: only with the commit and the zip `check` checked, once that commit is on GitHub. GitHub's
+token is git's (`git credential fill`), never printed or kept.
 
 `package_windows.py` makes `build/native/dist/Crash Twinsanity/` and `Crash-Twinsanity-Windows.zip`: the program, the
 DLLs, the fonts, the licences and native/PLAYING_WINDOWS.md as README.txt. The program's icon is native/icon/AppIcon.ico (the box
