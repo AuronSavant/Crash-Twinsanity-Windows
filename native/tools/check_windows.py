@@ -27,7 +27,12 @@ SELF_TESTS = ["abi", "lowmemory", "saves", "ui"]
 SCENARIOS = [
     ("Slip Slide's mine cradles (1.0.5)", "Levels\\Ice\\SlipSlide\\l05start", 60,
      "wait34,idle,wait4,bring:mine_cradle,wait6,bring:mine_cradle,wait6"),
+    ("Dingodile beaten, the boiler room's lock and the Academy (1.0.7)", "Levels\\school\\Boiler\\boiler_6", 65,
+     "wait20,state:dingodile_bossfight_director_activated:3,wait12,boil2lck,wait5,sch_hub,wait8"),
 ]
+# What a scenario's log mustn't have besides a crash: the disk manager's pool out of room (game/disk.cpp), and DMA reading
+# memory that isn't there (what a texture's data overwritten looks like before the crash)
+MEMORY_PROBLEMS = ["disk: no room", "reads from no memory"]
 
 
 def disc_image(root=HERE):
@@ -82,11 +87,14 @@ def scenarios(exe, work):
                                 "TWIN_HOP": hops, "TWIN_DETAILED_LOG": "1"}, timeout=seconds * 6 + 300)
         fatal = [line for line in log.splitlines() if line.startswith("[native] fatal")]
         played = any("sweep:" in line and (": ran (" in line or ": game over (" in line) for line in log.splitlines())
+        problems = [line for line in log.splitlines() if any(problem in line for problem in MEMORY_PROBLEMS)]
         if fatal:
             return name, False, fatal[0].replace("[native] ", "")
+        if problems:
+            return name, False, f"{len(problems)} memory problems, the first: {problems[0].replace('[native] ', '')}"
         if status != 0 or not played:
             return name, False, f"exit {status}, played: {played}"
-        return name, True, "no crash"
+        return name, True, "no crash, no memory problem"
     with ThreadPoolExecutor(3) as pool:
         return list(pool.map(one, SCENARIOS))
 
@@ -198,7 +206,7 @@ def report(exe, reference, work, with_sweep, reference_name=None):
             print(f"  FAILED {name}: {last}")
 
     played = scenarios(exe, work)
-    print(f"scenarios       {sum(ok for _, ok, _ in played)}/{len(played)} without a crash")
+    print(f"scenarios       {sum(ok for _, ok, _ in played)}/{len(played)} without a crash or a memory problem")
     for name, ok, what in played:
         if not ok:
             failed = True

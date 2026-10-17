@@ -32,6 +32,14 @@ constexpr s32 NoFit = -1;
 constexpr s32 WorstFit = 1000000000;
 // The disk manager's pool; the heap manager's takes what the platform has left after it
 constexpr u32 DiskPoolSize = 0x10A3D70;
+#ifdef TWIN_NATIVE
+// Natively the disk manager's pool is twice that, the heap manager's what it was: the chunks a link brings in are read before
+// the game lets go of the ones left behind (4 s after), faster than the PS2's drive and processor could, and the retail size ran
+// out going from the boiler room to its lock (native/NATIVE.md)
+constexpr u32 DiskPoolBytes = DiskPoolSize * 2;
+#else
+constexpr u32 DiskPoolBytes = DiskPoolSize;
+#endif
 
 // g_PoolsAllocated's entries
 enum PoolIndex : u32
@@ -811,8 +819,8 @@ extern "C"
         if (!g_PoolsAllocated[DiskPool])
         {
             g_PoolsAllocated[DiskPool] = true;
-            g_DiskPool = Platform::Memory::AllocatePool(DiskPoolSize);
-            DiskManagerSetPool(&g_DiskManager, g_DiskPool, DiskPoolSize);
+            g_DiskPool = Platform::Memory::AllocatePool(DiskPoolBytes);
+            DiskManagerSetPool(&g_DiskManager, g_DiskPool, DiskPoolBytes);
         }
 
         return &g_DiskManager;

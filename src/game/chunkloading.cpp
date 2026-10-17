@@ -22,6 +22,12 @@
 #include "game/stream.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "native.h"
+
+#include "game/disk.h"
+#endif
+
 // The chunks' loading: loaders of the chunks wanted around what the loading follows, and the links between chunks
 namespace
 {
@@ -1216,6 +1222,13 @@ bool Sm2Loader::StartLoading(s32 index, bool now)
         return false;
     }
 
+#ifdef TWIN_NATIVE
+    if (DiskTracing())
+    {
+        Native::Log("chunk: sm2 load %s", loader->path.string);
+    }
+#endif
+
     String path;
     path.string = nullptr;
     path.length = 0;
@@ -1249,6 +1262,13 @@ bool Sm2Loader::ContinueLoading(s32, bool)
 
 bool Sm2Loader::StartUnloading(s32, bool)
 {
+#ifdef TWIN_NATIVE
+    if (DiskTracing())
+    {
+        Native::Log("chunk: sm2 unload %s", loader->path.string);
+    }
+#endif
+
     return ReleaseChunkData(DataOf(data), true, true, true) != 0;
 }
 
@@ -1363,6 +1383,13 @@ bool Rm2Loader::StartLoading(s32 index, bool now)
         return false;
     }
 
+#ifdef TWIN_NATIVE
+    if (DiskTracing())
+    {
+        Native::Log("chunk: rm2 load %s", loader->path.string);
+    }
+#endif
+
     ChunkData* chunk = ChunkDataOf(loader);
     if (chunk == nullptr)
     {
@@ -1421,6 +1448,13 @@ bool Rm2Loader::ContinueLoading(s32, bool)
 
 bool Rm2Loader::StartUnloading(s32, bool)
 {
+#ifdef TWIN_NATIVE
+    if (DiskTracing())
+    {
+        Native::Log("chunk: rm2 unload %s", loader->path.string);
+    }
+#endif
+
     ChunkData* chunk = ChunkDataOf(loader);
     if (entry != nullptr)
     {

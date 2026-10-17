@@ -8,6 +8,8 @@
 
 #include "native.h"
 
+#include "game/agentlab.h"
+#include "game/behaviours.h"
 #include "game/chunkdata.h"
 #include "game/gamecontroller.h"
 #include "game/instances.h"
@@ -136,6 +138,180 @@ void VisitInstance(InstanceContext* instance, void* user)
     }
 }
 
+// The live instances of a chunk whose object's name holds a text (any case; none: every one): the scripts and state steps'
+struct InstanceList
+{
+    ChunkData* chunk;
+    std::string name;
+    std::vector<InstanceContext*> found;
+};
+
+void ListInstance(InstanceContext* instance, void* user)
+{
+    auto* list = static_cast<InstanceList*>(user);
+    std::string lower = ObjectNameOf(instance);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (instance->chunk == list->chunk && lower.find(list->name) != std::string::npos)
+    {
+        list->found.push_back(instance);
+    }
+}
+
+// A state's index in its graph (-1 for none)
+s32 StateIndex(GraphData* graph, GraphState* state)
+{
+    s32 index = 0;
+    for (GraphState* at = graph != nullptr ? graph->states : nullptr; at != nullptr; at = at->next, index++)
+    {
+        if (at == state)
+        {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+// An instance's behaviour runners logged: each level's graph and the state it's in, and the graph's states (a state's child
+// behaviour and packet, each body's condition (its ID and parameter, ! inverted), the state it jumps to and its commands' vtables;
+// the completion body first, marked)
+void LogScripts(InstanceContext* instance)
+{
+    auto* node = static_cast<ObjectNodeBase*>(GetGameNode(&instance->nodes, NodeObject));
+    if (node == nullptr)
+    {
+        return;
+    }
+
+    for (u32 slot = 0; slot < 2; slot++)
+    {
+        BehaviourRunner* runner = node->runners[slot];
+        if (runner == nullptr)
+        {
+            continue;
+        }
+
+        Native::Log("hop:   %s's runner %u, depth %u", ObjectNameOf(instance), slot, runner->depth);
+        for (u32 at = 0; at < BehaviourRunner::Levels && (at == 0 || at <= runner->depth); at++)
+        {
+            BehaviourLevel* level = runner->levels[at];
+            GraphData* graph = level != nullptr ? level->graph : nullptr;
+            if (graph == nullptr)
+            {
+                continue;
+            }
+
+            Native::Log("hop:     level %u: graph %u %.*s in state %d%s", at, graph->bits.id, static_cast<int>(graph->name.length),
+                        graph->name.string != nullptr ? graph->name.string : "", StateIndex(graph, level->state),
+                        level->bits.finished != 0 ? " (finished)" : "");
+            s32 index = 0;
+            for (GraphState* state = graph->states; state != nullptr; state = state->next, index++)
+            {
+                std::string bodies;
+                u32 body = 0;
+                for (StateBody* item = state->bodies; item != nullptr; item = item->next, body++)
+                {
+                    char text[64];
+                    bodies += body == 0 && state->bits.hasCompletion != 0 ? " [done" : " [";
+                    if (item->condition != nullptr)
+                    {
+                        std::snprintf(text, sizeof(text), " if %s%u(%u)", item->condition->bits.inverted != 0 ? "!" : "",
+                                      item->condition->bits.id, item->condition->bits.parameter);
+                        bodies += text;
+                    }
+
+                    for (ScriptCommand* command = item->commands; command != nullptr; command = command->next)
+                    {
+                        // (The builder leaves the IDs unset: the vtable tells the command's class)
+                        std::snprintf(text, sizeof(text), " %p", static_cast<const void*>(command->vtable));
+                        bodies += text;
+                    }
+
+                    std::snprintf(text, sizeof(text), " -> %d]", item->jump != nullptr ? StateIndex(graph, item->jump) : -1);
+                    bodies += text;
+                }
+
+                Native::Log("hop:       state %d%s%s:%s", index, state->packet != nullptr ? " packet" : "",
+                            state->bits.child != NoScriptId ? (" child " + std::to_string(state->bits.child)).c_str() : "",
+                            bodies.c_str());
+            }
+        }
+    }
+}
+
+// Whether a runner's level of an instance runs a graph whose name holds a text (lower case): its slot and level
+bool RunsGraph(InstanceContext* instance, const std::string& graphName, u32* slot, u32* at)
+{
+    auto* node = static_cast<ObjectNodeBase*>(GetGameNode(&instance->nodes, NodeObject));
+    for (u32 runnerSlot = 0; node != nullptr && runnerSlot < 2; runnerSlot++)
+    {
+        BehaviourRunner* runner = node->runners[runnerSlot];
+        for (u32 level = 0; runner != nullptr && level < BehaviourRunner::Levels; level++)
+        {
+            GraphData* graph = runner->levels[level] != nullptr ? runner->levels[level]->graph : nullptr;
+            if (graph == nullptr || graph->name.string == nullptr)
+            {
+                continue;
+            }
+
+            std::string lower(graph->name.string, graph->name.length);
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (lower.find(graphName) != std::string::npos)
+            {
+                *slot = runnerSlot;
+                *at = level;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// A runner's level made to jump to a state of its graph, as a body's jump does (the levels above it unwound, or the packet ended;
+// the state's packet started, the state entered at the runner's next frame)
+bool JumpToState(InstanceContext* instance, u32 slot, u32 at, s32 wanted)
+{
+    auto* node = static_cast<ObjectNodeBase*>(GetGameNode(&instance->nodes, NodeObject));
+    BehaviourRunner* runner = node != nullptr && slot < 2 ? node->runners[slot] : nullptr;
+    BehaviourLevel* level = runner != nullptr && at < BehaviourRunner::Levels ? runner->levels[at] : nullptr;
+    GraphState* target = level != nullptr && level->graph != nullptr ? level->graph->states : nullptr;
+    for (s32 index = 0; target != nullptr && index < wanted; index++)
+    {
+        target = target->next;
+    }
+
+    if (target == nullptr || wanted < 0)
+    {
+        return false;
+    }
+
+    if (level->state != nullptr && level->state->bits.child != NoScriptId)
+    {
+        runner->Unwind(level);
+    }
+    else
+    {
+        runner->EndPacket();
+    }
+
+    if (target->packet != nullptr)
+    {
+        runner->packet = target->packet;
+        GameNode* agent = runner->agentNode;
+        CallVirtual<void>(agent, agent->vtable, ObjectNode::PacketStartedSlot, runner);
+        runner->flags.packetRuns = 1;
+    }
+
+    level->entered = level->state;
+    level->state = target;
+    level->bits.finished = 0;
+    level->bits.restart = 0;
+    runner->depth = static_cast<u8>(at);
+    runner->flags.runLevels = 1;
+    return true;
+}
+
 // $TWIN_HOP=cryscave,escape: while playing, the player taken through its chunk's link to each of those chunks in turn (the tests'
 // way into chunks only entered from a neighbour), placed as the game's WarpToChunkLinkTowardsPlayer places an instance: half a
 // unit in front of the link's load wall, its middle, where the link takes it. The player's chunk changes are logged
@@ -227,6 +403,61 @@ void HopFrame()
         Native::Log("hop: the instances in %s", name.c_str());
         InstanceSearch search = {chunk, player, "", {}, nullptr, 0.0f};
         ForEachLiveInstance(VisitInstance, &search);
+        next++;
+        lastHop = now;
+        return;
+    }
+
+    // "scripts:NAME": the behaviour runners of the instances of the player's chunk whose object's name holds NAME logged (each
+    // level's graph and state, the graph's states). "state:GRAPH:N": the runner's level that runs a graph whose name holds GRAPH
+    // (the first of the player's chunk) made to jump to the graph's state N (where playing it out can't take a test: a boss
+    // beaten)
+    bool jump = targets[next].rfind("state:", 0) == 0;
+    if (jump || targets[next].rfind("scripts:", 0) == 0)
+    {
+        std::string wanted = targets[next].substr(jump ? 6 : 8);
+        s32 state = -1;
+        size_t colon = wanted.find(':');
+        if (colon != std::string::npos)
+        {
+            state = std::atoi(wanted.c_str() + colon + 1);
+            wanted.resize(colon);
+        }
+
+        std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return std::tolower(c); });
+        InstanceList list = {chunk, jump ? std::string() : wanted, {}};
+        ForEachLiveInstance(ListInstance, &list);
+        if (jump)
+        {
+            InstanceContext* runs = nullptr;
+            u32 slot = 0;
+            u32 at = 0;
+            for (InstanceContext* instance : list.found)
+            {
+                if (RunsGraph(instance, wanted, &slot, &at))
+                {
+                    runs = instance;
+                    break;
+                }
+            }
+
+            bool jumped = runs != nullptr && JumpToState(runs, slot, at, state);
+            Native::Log("hop: %s's runner %u, level %u, %s state %d of %s in %s",
+                        runs != nullptr ? ObjectNameOf(runs) : "no instance", slot, at,
+                        jumped ? "made to jump to" : "not made to jump to", state, wanted.c_str(), name.c_str());
+        }
+        else if (list.found.empty())
+        {
+            Native::Log("hop: no instance of an object named like %s in %s", wanted.c_str(), name.c_str());
+        }
+        else
+        {
+            for (InstanceContext* instance : list.found)
+            {
+                LogScripts(instance);
+            }
+        }
+
         next++;
         lastHop = now;
         return;

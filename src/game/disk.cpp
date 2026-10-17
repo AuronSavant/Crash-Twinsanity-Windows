@@ -4,6 +4,18 @@
 #include "platform/memory.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "native.h"
+
+#include <cstdlib>
+
+bool DiskTracing()
+{
+    static const bool tracing = std::getenv("TWIN_DISK_TRACE") != nullptr;
+    return tracing;
+}
+#endif
+
 namespace
 {
 using FreeList = IntrusiveList<DiskNode, &DiskNode::previousFree, &DiskNode::nextFree>;
@@ -594,6 +606,30 @@ extern "C"
     s32* DiskAllocate(s32* handle, DiskManager* manager, u32 size, bool readInto, u32 deferRelease)
     {
         DiskNode* node = DiskAllocateNode(manager, (size + BlockAlignment - 1) & ~static_cast<uiptr>(BlockAlignment - 1));
+#ifdef TWIN_NATIVE
+        if (node == nullptr)
+        {
+            // The retail code goes on with no node: the PS2's low memory gives it handle 0, the first block's, which its owner
+            // then lets go of (the native pool is big enough for this not to happen: memory.cpp)
+            u32 free = 0;
+            u32 largest = 0;
+            for (DiskNode* at = manager->nodes; at != nullptr; at = at->next)
+            {
+                if (at->bits.state == DiskNodeFree)
+                {
+                    free += at->size;
+                    largest = at->size > largest ? at->size : largest;
+                }
+            }
+
+            Native::Log("disk: no room for %u bytes in the pool (%u bytes free, the largest block %u)", size, free, largest);
+        }
+        else if (DiskTracing())
+        {
+            Native::Log("disk: allocate %d (%u bytes at %p) for %p", node->index, size, static_cast<void*>(node->memory),
+                        __builtin_return_address(0));
+        }
+#endif
         if (readInto)
         {
             Platform::Memory::BeforeDeviceWrite(node->memory, node->size);
@@ -608,6 +644,14 @@ extern "C"
 
     void DiskRelease(DiskManager* manager, const s32* handle)
     {
+#ifdef TWIN_NATIVE
+        if (DiskTracing())
+        {
+            DiskNode* node = manager->handles[*handle];
+            Native::Log("disk: release %d (state %u, %u bytes at %p) for %p", *handle, node->bits.state, node->size,
+                        static_cast<void*>(node->memory), __builtin_return_address(0));
+        }
+#endif
         if (!manager->handles[*handle]->bits.deferRelease)
         {
             DiskReleaseNow(manager, handle);

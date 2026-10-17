@@ -181,11 +181,13 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
     .venv\Scripts\python.exe native\tools\check_windows.py [--build] [--sweep]
 
 A line a check, the logs and pictures in `build/native/check/`, exit 1 when one fails: the four self-tests; the places that
-once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles); the beach's first 2,500 frames at a fixed time, every
-100th picture compared byte for byte with the last packaged build's (`build/native/dist/`, or `--reference PROGRAM`); with
-`--sweep`, every level chunk, its outcome against `native/sweep/results_windows.json` (a run that went on and one that ended
-in a game over count alike: the scripted input decides which). Some 3 minutes, 25 more with the sweep. Each run has a
-settings folder of its own; the disc image is local.json's.
+once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles; Dingodile beaten, then the boiler room's lock and the
+Academy's hub), each failing on a crash and on the log's signs of memory gone wrong (the disk manager's pool out of room, DMA
+reading memory that isn't there); the beach's first 2,500 frames at a fixed time, every 100th picture compared byte for byte
+with the last packaged build's (`build/native/dist/`, or `--reference PROGRAM`); with `--sweep`, every level chunk, its outcome
+against `native/sweep/results_windows.json` (a run that went on and one that ended in a game over count alike: the scripted
+input decides which). Some 3 minutes, 25 more with the sweep. Each run has a settings folder of its own; the disc image is
+local.json's.
 
 ## Debugging
 
@@ -194,6 +196,11 @@ settings folder of its own; the disc image is local.json's.
 - LLDB (LLVM-MinGW's) runs it: `lldb build\native\cmake\CrashTwinsanity.exe`.
 - `$TWIN_DEBUG_HEAP`: a small allocation freed twice or not at an entry's start, and a free outside the game's pool, said with
   where it came from.
+- `$TWIN_DISK_TRACE`: every block of the disk manager's pool (the chunks' models, textures, animations) handed out and let go of,
+  with its handle, its size and the code that asked, and every chunk's SM2 and RM2 loaded and unloaded;
+  `native/tools/disk_use.py LOG [--by-caller]` sums it up (the pool's use at each chunk and game state, the most, and what held it
+  when it ran out). A pool out of room is in every log anyway ("disk: no room"): the retail code goes on with handle 0, another
+  block's, and its owner's data is overwritten later (1.0.6's crashes after Dingodile).
 - `$TWIN_PIXEL_WATCH=X,Y` (and `$TWIN_PIXEL_WATCH_VERTEXES`): every primitive drawn over a pixel of the PS2's picture, with its
   state and vertexes.
 - `native/tools/level_sweep.py OUT` plays every level chunk headless (native/LEVEL_SWEEP.md); on Windows it isolates each run's
@@ -234,7 +241,10 @@ settings folder of its own; the disc image is local.json's.
   front of the link's load wall, where the link takes it). Other steps: `goto:X:Y:Z` puts the player there; `objects` logs the
   instances of its chunk (their objects' names and places); `on:mine` puts it 2 units above the nearest instance whose
   object's name holds "mine" (`on:mine:5`: 5 units) and `bring:mine` puts that instance where the player is instead; `idle`
-  stops the scripted input and `input` starts it again; `wait5` waits 5 s; `die` drops it to its death. Down a slide (Slip
+  stops the scripted input and `input` starts it again; `wait5` waits 5 s; `die` drops it to its death; `scripts:director`
+  logs the behaviour scripts of the instances whose object's name holds "director" (each runner's graphs, the state they're in,
+  every state's bodies: condition, commands, jump) and `state:GRAPH:3` makes the runner that runs a graph whose name holds GRAPH
+  jump to its state 3, as a body's jump would (a boss beaten without playing it: check_windows.py's Dingodile). Down a slide (Slip
   Slide Icecapades) the player's physics undo `goto` and a hop stops the slide: start at the level's start, let the scripted
   input get through its cutscene, then `idle` lets the slide go on by itself and `bring` puts things in its way.
   `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's chunk (index, place, box); a list of steps (`4,die,4`)

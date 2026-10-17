@@ -90,6 +90,12 @@ struct DiskPendingRelease
 };
 CHECK_SIZE(DiskPendingRelease, 0xC);
 
+#ifdef TWIN_NATIVE
+// $TWIN_DISK_TRACE (native/WINDOWS.md, "Debugging"): every block of the pool handed out and let go of, and every chunk's files
+// loaded and unloaded, logged
+bool DiskTracing();
+#endif
+
 // A handle of no memory (a reader's before it has any)
 constexpr s32 NoDiskHandle = -1;
 constexpr u32 DiskSizeClasses = 16;
