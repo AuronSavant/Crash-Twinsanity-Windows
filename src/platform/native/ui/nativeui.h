@@ -219,6 +219,10 @@ enum NativeText : u32
     TextDescMouseSensitivity,
     TextDescInvertMouseY,
     TextFxaa,
+    TextMenuHints,
+    TextDescMenuHints,
+    TextHintsOriginal,
+    TextHintsBar,
     NativeTextEnd,
 };
 
@@ -343,6 +347,8 @@ enum Option : u32
     OptionLanguage,
     // More of what the game does written to the log (trail.cpp), for bug reports
     OptionDetailedLog,
+    // The game's menus' button hints: the game's own (0: OLEG's labels, their glyphs the controller's) or the native bar (1)
+    OptionMenuHints,
     OptionCount,
 };
 
@@ -409,7 +415,11 @@ bool MenuActiveRecently();
 // An item's area (fractions of the picture) for the mouse, for items drawn as shapes rather than lines (the save slots)
 void RecordMenuRect(const MenuPage* page, const MenuItem* item, f32 left, f32 top, f32 right, f32 bottom);
 void MouseMenuStep(MenuPage* page, MenuInput* input, MenuSounds* sounds, u32 player);
+// The pad's buttons a click on a hint presses (a pages' arrow: L1 or R1), for a few of the pad's reads (ReadBindings adds them)
+u32 MouseMenuButtons();
 void ScriptMouse(f32 x, f32 y, bool click);
+// The shots' script: the mouse onto the middle of the game's hint of that text (0x1C select ...) drawn last frame, clicked or not
+bool ScriptMouseToHint(u32 text, bool click);
 // A window point (SDL's) in fractions of the game's picture; a text's width and height (fractions) in the renderer's font and scale
 void WindowToPicture(f32 x, f32 y, f32* outX, f32* outY);
 bool TextExtent(const Renderer* renderer, const char* text, f32* width, f32* height);
@@ -432,7 +442,7 @@ void SettingsActForTest(u32 action);
 void SettingsShotsFrame();
 void SettingsMouseForTest(f32 x, f32 y, bool click);
 void SettingsCursorForTest(f32 x, f32 y);
-// Whether the mouse is over a line of the game's menus drawn last frame (the cursor's hover)
+// Whether the mouse is over a line of the game's menus or one of their hints drawn last frame (the cursor's hover)
 bool MouseOverAnyMenuLine();
 u32 SettingsTabForTest();
 s32 SettingsRowForTest();

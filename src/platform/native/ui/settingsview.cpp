@@ -876,17 +876,19 @@ void DrawGameMenuChrome(OverlayFrame& frame, std::vector<HitRegion>& regions)
         return;
     }
 
-    // The game's hints (OLEG's labels) drawn as the bar's prompts while they show (their own drawing left out)
+    // The game's hints (OLEG's labels): the game draws them itself (their glyphs the controller's: SetPromptLabels), or the bar
+    // draws them as its prompts while they show (their own drawing left out)
     OLEG& oleg = controller->oleg;
     Label* hints[] = {&oleg.selectHint, &oleg.backHint, &oleg.cancelHint, &oleg.pagesLeftHint, &oleg.pagesRightHint, &oleg.nextHint};
+    bool bar = IsOn(OptionMenuHints);
     bool any = false;
     for (Label* hint : hints)
     {
-        hint->flags.invisible = 1;
+        hint->flags.invisible = bar ? 1 : 0;
         any = any || hint->State() >= Widget::StateAppearing;
     }
 
-    if (!any)
+    if (!bar || !any)
     {
         return;
     }

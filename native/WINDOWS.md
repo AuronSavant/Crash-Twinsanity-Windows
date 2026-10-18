@@ -183,11 +183,13 @@ repetitive); of its 16-byte blocks, two are, which are text of the program's own
 A line a check, the logs and pictures in `build/native/check/`, exit 1 when one fails: the four self-tests; the places that
 once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles; Dingodile beaten, then the boiler room's lock and the
 Academy's hub), each failing on a crash and on the log's signs of memory gone wrong (the disk manager's pool out of room, DMA
-reading memory that isn't there); the beach's first 2,500 frames at a fixed time, every 100th picture compared byte for byte
+reading memory that isn't there); the pause menu's hints (its `HINTS`: the game's own with a PlayStation pad's, an Xbox pad's,
+a Nintendo pad's and the keyboard's prompts, and the bar), each shown as the menu hints option has them and the game's own clicked with the
+mouse (`$TWIN_HINTS_TEST`, below); the beach's first 2,500 frames at a fixed time, every 100th picture compared byte for byte
 with the last packaged build's (`build/native/dist/`, or `--reference PROGRAM`); with `--sweep`, every level chunk, its outcome
 against `native/sweep/results_windows.json` (a run that went on and one that ended in a game over count alike: the scripted
 input decides which). Some 3 minutes, 25 more with the sweep. Each run has a settings folder of its own; the disc image is
-local.json's.
+local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, and saves the pause menu's pictures there.
 
 ## Debugging
 
@@ -250,6 +252,11 @@ local.json's.
   `$TWIN_TRIGGER_PLAN=list` lists the message triggers of the player's chunk (index, place, box); a list of steps (`4,die,4`)
   puts the player in a trigger or drops it to its death every 8 s, the lives kept up. `$TWIN_SWEEP_IDLE` gives no scripted
   input (cutscenes play out). `$TWIN_TEST_PICK=PATH` is the disc image dialog's pick (empty: cancelled).
+- `$TWIN_HINTS_TEST=1` (with `--quick`, ui/hintstest.cpp): the beach played a few seconds, then the pause menu: its hints
+  checked as the menu hints option has them and logged as the prompts label them (`$TWIN_UI_PROMPTS=playstation|xbox|switch|
+  keyboard` picks the controller), then the mouse clicks the pages' right and left arrows and back; "hints test: pass" and exit 0.
+  `$TWIN_HINTS_TEST=FOLDER` without `--headless` also saves the window as it's shown (the picture and the overlay:
+  `NativeGraphicsShootWindow`) there: hints_pause.png and hints_levels.png.
 
 ## Releasing
 

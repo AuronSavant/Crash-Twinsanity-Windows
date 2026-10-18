@@ -28,3 +28,7 @@ void NativeUiCrtShaderUniforms(unsigned int program, void* (*getProcAddress)(con
 // (its pixels), depth, stencil and scissor tests off and the blend state left to it; pixelScale is the window's pixels a point.
 // It leaves GL's state as it likes: the presenter and the hardware renderer set what they need. Null: none
 void NativeGraphicsSetOverlay(void (*draw)(int windowPixelWidth, int windowPixelHeight, float pixelScale));
+
+// Testing: the window as the next picture shows it (the picture and the overlay over it, at the window's pixels) written to a PNG
+// (none without a window: a headless run)
+void NativeGraphicsShootWindow(const char* path);

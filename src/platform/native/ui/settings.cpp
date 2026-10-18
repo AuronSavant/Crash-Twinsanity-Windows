@@ -261,6 +261,7 @@ void Build()
     Row layout = OptionChoice(TextNintendoLayout, TextDescLayout, OptionNintendoLayout, {TextPositional, TextNintendo});
     layout.shown = [] { return CurrentPromptStyle() == PromptSwitch; };
     controls.push_back(layout);
+    controls.push_back(OptionChoice(TextMenuHints, TextDescMenuHints, OptionMenuHints, {TextHintsOriginal, TextHintsBar}));
     controls.push_back(Toggle(TextMouse, TextDescMouse, OptionMouse));
     controls.push_back(Toggle(TextMouseLook, TextDescMouseLook, OptionMouseLook));
     Row sensitivity = OptionSlider(TextMouseSensitivity, TextDescMouseSensitivity, OptionMouseSensitivity, 1, 10);

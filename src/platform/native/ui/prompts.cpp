@@ -2,7 +2,8 @@
 // decides how the game's texts show their button glyphs (SetPromptLabels): a PlayStation pad the game's own glyphs, an Xbox (or any
 // other) pad A B X Y LB RB LT RT, a Nintendo pad its own letters, the keyboard the bound keys' names. The menus' select and back
 // buttons are labelled as the menus take them (with a Nintendo pad's own layout: A, the right button, selects and B, the bottom
-// one, goes back). Until the Xbox's glyph art is read from the user's Xbox disc, the labels are letters in the game's font
+// one, goes back). A pad's buttons are drawn in the glyphs' places: the Xbox's own glyphs read from the user's Xbox disc, else
+// drawn in the game's style (buttonart.cpp)
 #include "ui/bindings.h"
 #include "ui/overlayinternal.h"
 
@@ -237,6 +238,34 @@ std::string Label(PromptStyle style, BindingFunction function)
         return "";
     }
 }
+
+// A function's glyph (its first: L1's for the left shoulder), in PromptGlyphs' order
+u32 GlyphOf(BindingFunction function)
+{
+    for (u32 glyph = 0; glyph < PromptGlyphCount; glyph++)
+    {
+        if (GlyphFunctions[glyph] == function)
+        {
+            return glyph;
+        }
+    }
+
+    return 0;
+}
+
+// A glyph's label: its function's, a pad's L2 and R2 by the function's second button (L1 and L2 are one function, the shoulder:
+// the bumper and, by default, the trigger)
+std::string GlyphLabel(PromptStyle style, u32 glyph)
+{
+    const Binding& binding = GetBinding(GlyphFunctions[glyph]);
+    bool trigger = PromptGlyphs[glyph] == '\xA6' || PromptGlyphs[glyph] == '\xAC';
+    if (trigger && (style == PromptXbox || style == PromptSwitch) && binding.button2 >= 0)
+    {
+        return PadLabel(style, binding.button2);
+    }
+
+    return Label(style, GlyphFunctions[glyph]);
+}
 }
 
 PromptStyle PadPromptStyle()
@@ -279,7 +308,7 @@ std::string GlyphPrompt(char glyph)
     {
         if (PromptGlyphs[index] == glyph)
         {
-            return PromptOf(GlyphFunctions[index]);
+            return g_Style == PromptPlayStation ? std::string(1, glyph) : GlyphLabel(g_Style, index);
         }
     }
 
@@ -355,16 +384,15 @@ PromptStyle CurrentPromptStyle()
 void UpdatePrompts()
 {
     // The glyphs as the gameplay has them (by the pad's places), and the menus' lines' select and back as the menus take them. With
-    // the Xbox's art (the user's disc, and the graphics drawing a code's glyph from an image) a code keeps its glyph and the glyph
-    // is drawn as the art of its button's label; without it the label is written in the font
+    // a pad's art (the user's Xbox disc's, else the drawn: GlyphButtonArt) and the graphics drawing a code's glyph from an image, a
+    // code keeps its glyph and the glyph is drawn as the art of its button's label; without it the label is written in the font
     bool artStyle = g_Style == PromptXbox || g_Style == PromptSwitch;
-    bool art = artStyle && HaveButtonArt();
     const char* labels[PromptGlyphCount] = {};
     bool* drawnAsArt = g_DrawnAsArt;
     for (u32 glyph = 0; glyph < PromptGlyphCount; glyph++)
     {
-        g_Labels[glyph] = Label(g_Style, GlyphFunctions[glyph]);
-        const ButtonArt* image = art ? GetButtonArt(g_Style, ArtLabelOf(g_Labels[glyph])) : nullptr;
+        g_Labels[glyph] = GlyphLabel(g_Style, glyph);
+        const ButtonArt* image = artStyle ? GlyphButtonArt(g_Style, ArtLabelOf(g_Labels[glyph])) : nullptr;
         u8 code = static_cast<u8>(PromptGlyphs[glyph]);
         if (image != nullptr && NativeGraphicsSetGlyphImage(code, image->pixels.data(), image->width, image->height))
         {
@@ -397,13 +425,23 @@ void UpdatePrompts()
         labels[glyph] = g_Labels[glyph].empty() ? nullptr : g_Labels[glyph].c_str();
     }
 
+    // The menus' select and back: the keyboard's Enter and Escape (every menu takes them: mouse.cpp), a pad's buttons
     BindingFunction select;
     BindingFunction back;
     MenuFunctions(g_Style, &select, &back);
     static std::string selectLabel;
     static std::string backLabel;
-    selectLabel = g_Style == PromptPlayStation || drawnAsArt[select] ? std::string(1, PromptGlyphs[select]) : Label(g_Style, select);
-    backLabel = g_Style == PromptPlayStation || drawnAsArt[back] ? std::string(1, PromptGlyphs[back]) : Label(g_Style, back);
+    u32 selectGlyph = GlyphOf(select);
+    u32 backGlyph = GlyphOf(back);
+    bool glyphs = g_Style == PromptPlayStation;
+    selectLabel = glyphs || drawnAsArt[selectGlyph] ? std::string(1, PromptGlyphs[selectGlyph]) : Label(g_Style, select);
+    backLabel = glyphs || drawnAsArt[backGlyph] ? std::string(1, PromptGlyphs[backGlyph]) : Label(g_Style, back);
+    if (g_Style == PromptKeyboard)
+    {
+        selectLabel = MenuSelectPrompt();
+        backLabel = MenuBackPrompt();
+    }
+
     SetPromptLabels(labels, selectLabel.c_str(), backLabel.c_str());
     ApplyMenuLayout();
 }

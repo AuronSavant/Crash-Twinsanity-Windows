@@ -66,6 +66,7 @@ constexpr OptionInfo Infos[OptionCount] = {
     {OptionInvertMouseY, "invert_mouse_y", 0, 1},
     {OptionLanguage, "language", 0, 5},
     {OptionDetailedLog, "detailed_log", 0, 1},
+    {OptionMenuHints, "menu_hints", 0, 1},
 };
 
 s32 g_Values[OptionCount];
@@ -300,6 +301,7 @@ void Frame()
     TrailFrame();
     SweepFrame();
     SaveTestFrame();
+    HintsTestFrame();
     SettingsShotsFrame();
     MouseFrame();
     ApplyGameSettingsOnce();

@@ -73,6 +73,15 @@ The defaults (`src/platform/native/ui/bindings.cpp`, `Infos`; rebound on the opt
 - Prompts: with the keyboard in use, a key on a mouse button shows as a keycap with the mouse drawn on it and that button lit
   (`mouseart.cpp`): the options' footer and descriptions, the Controls table (the mouse beside its name), and the game's own hints
   (their glyph drawn as the mouse through `NativeGraphicsSetGlyphImage`, as the Xbox's art is).
+- The game's menus' hints (the Controls tab's "Menu hints", `OptionMenuHints`, `menu_hints` in options.txt): "original" (the
+  default) leaves OLEG's own hints as the game draws them (select, back, cancel, next and the pause's pages' arrows, "< L1 L2"
+  and "R1 R2 >"), their glyphs the controller's as every text's are: a PlayStation pad the game's glyphs, an Xbox or a Nintendo
+  pad its buttons (L2 and R2 by the shoulders' second button, the triggers) drawn in the glyphs' places, the Xbox disc's own
+  glyphs when there is one (`xboxart.cpp`), else drawn in the game's glyphs' style (`buttonart.cpp`: the dark disc with its
+  letter in the pad's colour, the grey bent key with its name), the keyboard its keys (the menus' select and back
+  Enter and Esc; one key on both L1 and L2 written once). "Bar" hides them and draws the native bar of prompts instead
+  (`DrawGameMenuChrome`, settingsview.cpp). The mouse clicks the game's own: select, back, and an arrow turns the pause's pages
+  as L1 and R1 do (mouse.cpp).
 - `--selftest-ui` checks the defaults, WASD's diagonal, the mouse keys' names, mouse look's push (a flick saturates, a slow move
   pushes a little, back to the middle with no motion, Y inverted) and the skip below.
 

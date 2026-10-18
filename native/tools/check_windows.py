@@ -30,6 +30,10 @@ SCENARIOS = [
     ("Dingodile beaten, the boiler room's lock and the Academy (1.0.7)", "Levels\\school\\Boiler\\boiler_6", 65,
      "wait20,state:dingodile_bossfight_director_activated:3,wait12,boil2lck,wait5,sch_hub,wait8"),
 ]
+# The pause menu's hints checked for each controller's prompts and the menu hints option (hintstest.cpp): the prompts' style
+# ($TWIN_UI_PROMPTS) and the option (options.txt's menu_hints: 0 the game's own hints, 1 the bar). The pause on the window's focus
+# lost is off: a run with a window (the shots) isn't the window in front
+HINTS = [("playstation", 0), ("xbox", 0), ("switch", 0), ("keyboard", 0), ("xbox", 1)]
 # What a scenario's log mustn't have besides a crash: the disk manager's pool out of room (game/disk.cpp), and DMA reading
 # memory that isn't there (what a texture's data overwritten looks like before the crash)
 MEMORY_PROBLEMS = ["disk: no room", "reads from no memory"]
@@ -46,15 +50,17 @@ def disc_image(root=HERE):
     return image
 
 
-def run_game(exe, folder, arguments, environment=None, timeout=900):
-    """The program run with a settings folder of its own (the disc image remembered there), its log in folder/log.txt:
-    (exit status, log)"""
+def run_game(exe, folder, arguments, environment=None, timeout=900, options=None):
+    """The program run with a settings folder of its own (the disc image remembered there, and options.txt's lines if given), its
+    log in folder/log.txt: (exit status, log)"""
     folder = Path(folder)
     if folder.exists():
         shutil.rmtree(folder)
     settings = folder / "settings" / "Crash Twinsanity"
     settings.mkdir(parents=True)
     (settings / "disc_image.txt").write_text(disc_image() + "\n")
+    if options:
+        (settings / "options.txt").write_text(options)
     env = dict(os.environ, HOME=str(folder / "settings"), APPDATA=str(folder / "settings"), TWINSANITY_AUDIO="off")
     env.update(environment or {})
     with open(folder / "log.txt", "w") as log:
@@ -97,6 +103,29 @@ def scenarios(exe, work):
         return name, True, "no crash, no memory problem"
     with ThreadPoolExecutor(3) as pool:
         return list(pool.map(one, SCENARIOS))
+
+
+def menu_hints(exe, work, shots=None):
+    """The pause menu's hints (hintstest.cpp) for each of HINTS: shown as the option has them, their lines as the prompts label
+    them, and the game's own clicked with the mouse (the pages' arrows, back). With shots (a folder) the window is saved there,
+    run with a window rather than headless: [(name, passed, what happened)]"""
+    def one(case):
+        style, bar = case
+        name = f"{style}, {'bar' if bar else 'original'}"
+        folder = work / f"hints-{style}-{'bar' if bar else 'original'}"
+        pictures = Path(shots) / f"{style}-{'bar' if bar else 'original'}" if shots else None
+        if pictures:
+            pictures.mkdir(parents=True, exist_ok=True)
+        status, log = run_game(exe, folder, ["--quick"] + ([] if pictures else ["--headless"]),
+                               {"TWIN_HINTS_TEST": str(pictures.resolve()) if pictures else "1", "TWIN_UI_PROMPTS": style},
+                               timeout=300, options=f"menu_hints={bar}\npause_on_focus_loss=0\n")
+        lines = [line.split("hints test: ", 1)[1] for line in log.splitlines() if "hints test: " in line]
+        hints = next((line for line in lines if line.startswith(("original, the hints", "bar, the hints"))), "")
+        hints = hints.split(", the hints ", 1)[1].rsplit(" (", 1)[0] if hints else ""
+        last = lines[-1] if lines else f"exit {status}, no result"
+        return name, status == 0 and last.startswith("pass"), f"{last}; {hints}"
+    with ThreadPoolExecutor(1 if shots else 2) as pool:
+        return list(pool.map(one, HINTS))
 
 
 def pictures(exe, reference, work, last=2500, every=100):
@@ -175,6 +204,8 @@ def main():
                         help="the program whose pictures ours must match (none: no comparison)")
     parser.add_argument("--sweep", action="store_true", help="every level chunk too (some 20 minutes)")
     parser.add_argument("--work", default=str(HERE / "build/native/check"))
+    parser.add_argument("--hints-shots", metavar="FOLDER",
+                        help="only the menu hints' check, with a window: the pause menu's pictures saved in FOLDER")
     arguments = parser.parse_args()
 
     if arguments.build:
@@ -188,6 +219,11 @@ def main():
         sys.exit(f"{exe} isn't built")
     work = Path(arguments.work)
     work.mkdir(parents=True, exist_ok=True)
+    if arguments.hints_shots:
+        results = menu_hints(exe, work, arguments.hints_shots)
+        for name, ok, what in results:
+            print(f"hints           {'ok' if ok else 'FAILED'} {name}: {what}")
+        sys.exit(0 if all(ok for _, ok, _ in results) else 1)
     print(f"checking        {exe}")
     failed = report(exe, Path(arguments.reference) if arguments.reference else None, work, arguments.sweep)
     print(f"details in      {work}")
@@ -208,6 +244,13 @@ def report(exe, reference, work, with_sweep, reference_name=None):
     played = scenarios(exe, work)
     print(f"scenarios       {sum(ok for _, ok, _ in played)}/{len(played)} without a crash or a memory problem")
     for name, ok, what in played:
+        if not ok:
+            failed = True
+            print(f"  FAILED {name}: {what}")
+
+    hints = menu_hints(exe, work)
+    print(f"menu hints      {sum(ok for _, ok, _ in hints)}/{len(hints)} as the option and the controller have them")
+    for name, ok, what in hints:
         if not ok:
             failed = True
             print(f"  FAILED {name}: {what}")

@@ -198,6 +198,10 @@ The graphic options' resolution setting (NATIVE.md) adds texts of its own after 
 | 0x199 | how fast the mouse turns the camera. | la vitesse de la caméra à la souris. | wie schnell die maus die kamera dreht. | lo rápido que el ratón gira la cámara. | quanto velocemente il mouse gira la telecamera. |
 | 0x19A | moving the mouse up looks down. | souris vers le haut : la caméra baisse. | maus hoch blickt nach unten. | ratón arriba mira hacia abajo. | mouse in alto guarda in basso. |
 | 0x19B | fxaa | fxaa | fxaa | fxaa | fxaa |
+| 0x19C | menu hints | aides des menus | menühinweise | ayudas de menú | suggerimenti menu |
+| 0x19D | the menus' button hints: the game's own, or a bar at the bottom. | les aides des boutons : celles du jeu, ou une barre en bas. | die tastenhinweise: die des spiels oder eine leiste unten. | las ayudas de botones: las del juego o una barra abajo. | i suggerimenti dei tasti: quelli del gioco o una barra in basso. |
+| 0x19E | original | originales | original | originales | originali |
+| 0x19F | bar | barre | leiste | barra | barra |
 
 ## English (29 lines)
 

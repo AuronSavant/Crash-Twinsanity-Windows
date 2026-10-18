@@ -147,6 +147,9 @@ bool SaveTestActive();
 void SaveTestFrame();
 bool SaveTestMenuStep(MenuPage* page, MenuInput* input, u32 player);
 void SaveTestInput(BoundPad* pad);
+// The game's menus' hints test ($TWIN_HINTS_TEST, hintstest.cpp): its frame and its scripted start
+void HintsTestFrame();
+void HintsTestInput(BoundPad* pad);
 
 // The mouse in play (mouselook.cpp): its events watched (once), the window holding the mouse in relative mode while the game is
 // played with mouse look on (a game frame's check), whether it holds it, the right stick's deflection from the motion since the
@@ -229,6 +232,10 @@ enum ButtonArtLabel : u32
 };
 bool HaveButtonArt();
 const ButtonArt* GetButtonArt(PromptStyle style, ButtonArtLabel label);
+// The buttons drawn in the game's glyphs' style (buttonart.cpp), and the art the game's texts' glyphs are drawn as: the disc's
+// when there is one, else the drawn
+const ButtonArt* DrawnButtonArt(PromptStyle style, ButtonArtLabel label);
+const ButtonArt* GlyphButtonArt(PromptStyle style, ButtonArtLabel label);
 void ForgetButtonArtForTest();
 // An RGBA picture (red the low byte) written as a PNG (uishots.cpp)
 bool WritePngFile(const std::string& path, const u32* pixels, u32 width, u32 height);

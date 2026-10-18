@@ -27,8 +27,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 // The window's OpenGL 3.3 core presenter: the PCRTC's picture is a texture drawn over the window at the TV's shape (4:3, or 16:9
 // when the game's screen setting says the TV is wide), letterboxed. Its scaling is linear (the TV's analogue picture has no
@@ -105,6 +107,9 @@ struct Gl
     GLsync (*FenceSync)(GLenum, GLbitfield);
     void (*WaitSync)(GLsync, GLbitfield, unsigned long long);
     void (*DeleteSync)(GLsync);
+    // The window's shots (NativeGraphicsShootWindow)
+    void (*PixelStorei)(GLenum, GLint);
+    void (*ReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
 };
 
 struct Presenter
@@ -135,6 +140,9 @@ struct Presenter
 
 Presenter g_Presenter;
 void (*g_Overlay)(int, int, float) = nullptr;
+// The window shot asked for (NativeGraphicsShootWindow): its file, written at the next picture shown
+std::mutex g_WindowShotLock;
+std::string g_WindowShotPath;
 NativeGraphics::Picture g_Picture;
 bool g_Pal = true;
 bool g_Paced = true;
@@ -297,6 +305,39 @@ void main()
 }
 )";
 
+// The window as it's about to be shown (the picture and the overlay over it) written as the PNG asked for, if one is
+void WriteWindowShot(s32 width, s32 height)
+{
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(g_WindowShotLock);
+        path.swap(g_WindowShotPath);
+    }
+
+    if (path.empty() || width <= 0 || height <= 0)
+    {
+        return;
+    }
+
+    Gl& gl = g_Presenter.gl;
+    std::vector<u32> rows(static_cast<size_t>(width) * static_cast<size_t>(height));
+    gl.BindFramebuffer(0x8D40, 0);
+    gl.PixelStorei(0x0D05, 4);
+    gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
+    std::vector<u32> pixels(rows.size());
+    for (s32 y = 0; y < height; y++)
+    {
+        const u32* row = &rows[static_cast<size_t>(height - 1 - y) * static_cast<size_t>(width)];
+        for (s32 x = 0; x < width; x++)
+        {
+            pixels[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] = row[x] | 0xFF000000u;
+        }
+    }
+
+    bool written = WritePng(path, pixels.data(), static_cast<u32>(width), static_cast<u32>(height));
+    Native::Log("window shot: %s (%dx%d)%s", path.c_str(), width, height, written ? "" : ", not written");
+}
+
 // The picture drawn over the window: a texture's rectangle (0-1, top row first) of a picture of these pixels, at the TV's shape
 void PresentTexture(GLuint texture, f32 u0, f32 v0, f32 u1, f32 v1, u32 pictureWidth, u32 pictureHeight, u32 texelsPerPixel)
 {
@@ -384,6 +425,7 @@ void PresentTexture(GLuint texture, f32 u0, f32 v0, f32 u1, f32 v1, u32 pictureW
         g_Overlay(width, height, points > 0 ? static_cast<f32>(width) / static_cast<f32>(points) : 1.0f);
     }
 
+    WriteWindowShot(width, height);
     SDL_GL_SwapWindow(p.window);
 }
 
@@ -704,6 +746,12 @@ void NativeGraphicsSetOverlay(void (*draw)(int windowPixelWidth, int windowPixel
     g_Overlay = draw;
 }
 
+void NativeGraphicsShootWindow(const char* path)
+{
+    std::lock_guard<std::mutex> lock(g_WindowShotLock);
+    g_WindowShotPath = path != nullptr ? path : "";
+}
+
 int NativeGraphicsPostFilterInUse()
 {
     return g_Presenter.postProgram != 0 ? g_Presenter.madePostFilter : 0;
@@ -763,6 +811,8 @@ void NativeGraphicsAttachWindow(SDL_Window* window)
     Load(gl.FenceSync, "glFenceSync");
     Load(gl.WaitSync, "glWaitSync");
     Load(gl.DeleteSync, "glDeleteSync");
+    Load(gl.PixelStorei, "glPixelStorei");
+    Load(gl.ReadPixels, "glReadPixels");
 
     const char* filter = std::getenv("TWIN_DISPLAY_FILTER");
     if (filter != nullptr)

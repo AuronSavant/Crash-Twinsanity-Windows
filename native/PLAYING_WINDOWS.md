@@ -60,7 +60,8 @@ A controller (Xbox, PlayStation, Switch and most others) works out of the box, a
 | Fullscreen | Alt+Enter |
 
 Everything can be rebound in **Options > Controls**; the button prompts follow what you last used. Mouse look, its sensitivity
-and inverted Y are there too.
+and inverted Y are there too, and **Menu hints**: the menus' own hints as the game draws them (the default, their buttons the
+controller's, and clickable), or a bar of prompts at the bottom.
 
 ## Options
 

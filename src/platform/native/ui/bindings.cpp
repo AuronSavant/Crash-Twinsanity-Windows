@@ -434,7 +434,7 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
         return;
     }
 
-    pad->buttons = UiShotsButtons();
+    pad->buttons = UiShotsButtons() | MouseMenuButtons();
     bool playing = InPlay();
     // The mouse's buttons and wheel as keys only in play (in the menus they're the mouse's own), with the window in front (or
     // holding the mouse)
@@ -637,9 +637,10 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
                   &pad->rightY);
         g_Walking = walking;
     }
-    // The level sweep's and the save test's scripted input
+    // The level sweep's, the save test's and the hints test's scripted input
     SweepInput(pad);
     SaveTestInput(pad);
+    HintsTestInput(pad);
 }
 
 void KeyName(s32 key, char* out, u32 size)

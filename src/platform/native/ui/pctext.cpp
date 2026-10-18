@@ -625,6 +625,10 @@ const NativeTextLine g_NativeTexts[] = {
     {TextDescMouseSensitivity, {"how fast the mouse turns the camera.", "la vitesse de la caméra à la souris.", "wie schnell die maus die kamera dreht.", "lo rápido que el ratón gira la cámara.", "quanto velocemente il mouse gira la telecamera."}},
     {TextDescInvertMouseY, {"moving the mouse up looks down.", "souris vers le haut : la caméra baisse.", "maus hoch blickt nach unten.", "ratón arriba mira hacia abajo.", "mouse in alto guarda in basso."}},
     {TextFxaa, {"fxaa", "fxaa", "fxaa", "fxaa", "fxaa"}},
+    {TextMenuHints, {"menu hints", "aides des menus", "menühinweise", "ayudas de menú", "suggerimenti menu"}},
+    {TextDescMenuHints, {"the menus' button hints: the game's own, or a bar at the bottom.", "les aides des boutons : celles du jeu, ou une barre en bas.", "die tastenhinweise: die des spiels oder eine leiste unten.", "las ayudas de botones: las del juego o una barra abajo.", "i suggerimenti dei tasti: quelli del gioco o una barra in basso."}},
+    {TextHintsOriginal, {"original", "originales", "original", "originales", "originali"}},
+    {TextHintsBar, {"bar", "barre", "leiste", "barra", "barra"}},
 };
 const u32 g_NativeTextCount = sizeof(g_NativeTexts) / sizeof(g_NativeTexts[0]);
 const char* const g_TextLanguages[TextLanguages] = {"English", "French", "German", "Spanish", "Italian"};
@@ -741,22 +745,32 @@ const char* Labelled(const char* line, bool menu)
         return found->second.c_str();
     }
 
+    // A label the same as the one just before it, only spaces between, is written once (the pages' "< { ¦", L1 and L2, on one
+    // key: "< z")
     std::string out;
+    std::string last;
+    size_t afterLast = std::string::npos;
     for (const char* at = line; *at != '\0'; at++)
     {
         const char* glyph = std::strchr(PromptGlyphs, *at);
-        if (menu && *at == '\\')
+        if (glyph == nullptr)
         {
-            out += g_MenuSelectLabel;
+            out += *at;
+            continue;
         }
-        else if (menu && *at == '^')
+
+        const std::string& label = menu && *at == '\\' ? g_MenuSelectLabel
+                                   : menu && *at == '^' ? g_MenuBackLabel
+                                                        : g_PromptLabels[glyph - PromptGlyphs];
+        if (afterLast != std::string::npos && label == last && out.find_first_not_of(' ', afterLast) == std::string::npos)
         {
-            out += g_MenuBackLabel;
+            out.resize(afterLast);
+            continue;
         }
-        else
-        {
-            out += glyph != nullptr ? g_PromptLabels[glyph - PromptGlyphs] : std::string(1, *at);
-        }
+
+        out += label;
+        last = label;
+        afterLast = out.size();
     }
 
     return g_Labelled.emplace(key, out).first->second.c_str();

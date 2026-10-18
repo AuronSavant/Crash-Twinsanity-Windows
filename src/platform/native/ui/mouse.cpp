@@ -1,7 +1,8 @@
 // The mouse in the game's menus, for every menu at once: the menus' drawer (DrawMenuPage) notes each item's line as it queues its
-// text (its rectangle from the font's own layout, as the text is drawn), the overlay notes the footer's select and back prompts,
-// and a menu page's step (MenuPage::Step) takes the mouse as the game's own input: hovering a line selects its item as up and down
-// do (with their sound), a left click is select (a choice's click steps it on, as right does), a right click is back, the wheel
+// text (its rectangle from the font's own layout, as the text is drawn), the overlay notes the game's hints (select, back and the
+// pages' arrows), and a menu page's step (MenuPage::Step) takes the mouse as the game's own input: hovering a line selects its
+// item as up and down do (with their sound), a left click is select (a choice's click steps it on, as right does) and on a hint
+// what it says (an arrow: the pause's pages turned as L1 or R1 turns them), a right click is back, the wheel
 // steps the hovered choice left and right or moves the selection on a longer page. The system's cursor shows while the mouse
 // moves, hidden after 3 seconds still and while playing. Window points are mapped into the game's picture as the display shows it
 // (the TV's shape, letterboxed in the window)
@@ -39,9 +40,19 @@ struct Line
     f32 bottom;
 };
 
+// What a hint of the game's (OLEG's) does when it's clicked
+enum class FooterKind
+{
+    Select,
+    Back,
+    PagesLeft,
+    PagesRight,
+};
+
 struct Footer
 {
-    bool select;
+    FooterKind kind;
+    u32 text;
     f32 left;
     f32 top;
     f32 right;
@@ -49,9 +60,20 @@ struct Footer
 };
 
 constexpr f32 IdleSeconds = 3.0f;
-// The footer's lines: select and next (select), back and cancel (back)
-constexpr u32 FooterSelectTexts[] = {0x1C, 0xB2};
-constexpr u32 FooterBackTexts[] = {0x1D, 0xBB};
+// The hints' lines: select and next (select), back and cancel (back), the pages' arrows (L1 and L2, R1 and R2)
+constexpr struct
+{
+    u32 text;
+    FooterKind kind;
+} FooterTexts[] = {
+    {0x1C, FooterKind::Select},   {0xB2, FooterKind::Select},     {0x1D, FooterKind::Back},
+    {0xBB, FooterKind::Back},     {0x1E, FooterKind::PagesLeft},  {0x1F, FooterKind::PagesRight},
+};
+// The pad's buttons a click on a pages' arrow presses (the pause turns its pages on L1 and R1 themselves: GameController's
+// PausePage), and for how many more of the pad's reads
+constexpr u32 PadPressReads = 3;
+std::atomic<u32> g_PadPress{0};
+std::atomic<u32> g_PadPressReads{0};
 
 std::vector<Line> g_Lines;
 std::vector<Line> g_Drawing;
@@ -316,7 +338,27 @@ bool MouseOverAnyMenuLine()
         }
     }
 
+    for (const Footer& footer : g_Footers)
+    {
+        if (Inside(footer.left, footer.top, footer.right, footer.bottom))
+        {
+            return true;
+        }
+    }
+
     return false;
+}
+
+u32 MouseMenuButtons()
+{
+    u32 reads = g_PadPressReads.load(std::memory_order_relaxed);
+    if (reads == 0)
+    {
+        return 0;
+    }
+
+    g_PadPressReads.store(reads - 1, std::memory_order_relaxed);
+    return g_PadPress.load(std::memory_order_relaxed);
 }
 
 namespace
@@ -371,20 +413,17 @@ void RecordQueuedText(const Renderer* renderer, const char* text, f32 x, f32 y)
         return;
     }
 
-    for (int kind = 0; kind < 2; kind++)
+    for (const auto& hint : FooterTexts)
     {
-        for (u32 id : kind == 0 ? FooterSelectTexts : FooterBackTexts)
+        if (std::strcmp(text, GameText(hint.text)) == 0)
         {
-            if (std::strcmp(text, GameText(id)) == 0)
+            Footer footer = {hint.kind, hint.text, 0.0f, 0.0f, 0.0f, 0.0f};
+            if (TextRectangle(renderer, text, x, y, &footer.left, &footer.top, &footer.right, &footer.bottom))
             {
-                Footer footer = {kind == 0, 0.0f, 0.0f, 0.0f, 0.0f};
-                if (TextRectangle(renderer, text, x, y, &footer.left, &footer.top, &footer.right, &footer.bottom))
-                {
-                    g_FooterDrawing.push_back(footer);
-                }
-
-                return;
+                g_FooterDrawing.push_back(footer);
             }
+
+            return;
         }
     }
 }
@@ -488,9 +527,19 @@ void MouseMenuStep(MenuPage* page, MenuInput* input, MenuSounds* sounds, u32 pla
         {
             for (const Footer& footer : g_Footers)
             {
-                if (Inside(footer.left, footer.top, footer.right, footer.bottom))
+                if (!Inside(footer.left, footer.top, footer.right, footer.bottom))
                 {
-                    press(footer.select ? MenuInput::ActionSelect : MenuInput::ActionBack);
+                    continue;
+                }
+
+                if (footer.kind == FooterKind::Select || footer.kind == FooterKind::Back)
+                {
+                    press(footer.kind == FooterKind::Select ? MenuInput::ActionSelect : MenuInput::ActionBack);
+                }
+                else
+                {
+                    g_PadPress.store(footer.kind == FooterKind::PagesLeft ? PadBitL1 : PadBitR1, std::memory_order_relaxed);
+                    g_PadPressReads.store(PadPressReads, std::memory_order_relaxed);
                 }
             }
         }
@@ -539,6 +588,20 @@ bool ScriptMouseToLine(u32 index, bool click)
     const Line& line = g_Lines[index];
     ScriptMouse((line.left + line.right) * 0.5f, (line.top + line.bottom) * 0.5f, click);
     return true;
+}
+
+bool ScriptMouseToHint(u32 text, bool click)
+{
+    for (const Footer& footer : g_Footers)
+    {
+        if (footer.text == text)
+        {
+            ScriptMouse((footer.left + footer.right) * 0.5f, (footer.top + footer.bottom) * 0.5f, click);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool MouseOverLineForTest(const MenuPage* page)
