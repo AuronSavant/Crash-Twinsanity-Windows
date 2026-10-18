@@ -3,18 +3,17 @@
 clone of the public repository with no changes of its own, so nothing local gets into the build.
 
     .venv\\Scripts\\python.exe native\\tools\\release_windows.py check [--sweep]
-    .venv\\Scripts\\python.exe native\\tools\\release_windows.py publish NOTES.md
+    .venv\\Scripts\\python.exe native\\tools\\release_windows.py publish NOTES.md [--preview]
 
-check: pulls (fast-forward only), configures and builds afresh (build_windows.py --configure), packages
-(package_windows.py), then checks the zip, unpacked: the program's version against native/CMakeLists.txt's, the DLLs it
-imports, its files against the last release's, that the program has no 32-byte block of the game executable's data or VU
-microcode the last release's didn't, and check_windows.py's checks with the pictures compared with the last release's
-program. It prints the
-commit, the version and the zip's SHA-256, and keeps them for publish (build/native/release/release.json).
+check: pulls (fast-forward only), configures and builds afresh (build_windows.py --configure), packages (package_windows.py),
+then checks the zip, unpacked: the program's version against native/CMakeLists.txt's, the DLLs it imports, its files against the
+last release's, that the program has no 32-byte block of the game executable's data or VU microcode the last release's didn't,
+and check_windows.py's checks with the pictures compared with the last release's program. It prints the commit, the version and
+the zip's SHA-256, and keeps them for publish (build/native/release/release.json).
 
-publish: the release vVERSION on GitHub, a preview, its text NOTES.md with {commit} and {sha256} filled in; the zip
-uploaded, then downloaded back and its SHA-256 compared. Only after check, at the same commit, with the same zip. GitHub's
-token is git's (git credential fill): never printed or kept.
+publish: the release vVERSION on GitHub (a preview with --preview, as every release before 1.0.8 was), its text NOTES.md with
+{commit} and {sha256} filled in; the zip uploaded, then downloaded back and its SHA-256 compared. Only after check, at the same
+commit, with the same zip. GitHub's token is git's (git credential fill): never printed or kept.
 """
 import argparse
 import hashlib
@@ -232,8 +231,9 @@ def publish(arguments):
         sys.exit(f"{tag} is released already")
     notes = Path(arguments.notes).read_text(encoding="utf-8")
     notes = notes.replace("{commit}", checked["commit"][:7]).replace("{sha256}", checked["sha256"])
-    body = {"tag_name": tag, "target_commitish": checked["commit"], "name": f"Crash Twinsanity for Windows "
-            f"{checked['version']} (preview)", "body": notes, "prerelease": True, "draft": False}
+    name = f"Crash Twinsanity for Windows {checked['version']}" + (" (preview)" if arguments.preview else "")
+    body = {"tag_name": tag, "target_commitish": checked["commit"], "name": name, "body": notes,
+            "prerelease": arguments.preview, "draft": False}
     release = api(f"https://api.github.com/repos/{slug}/releases", secret, json.dumps(body).encode(), method="POST")
     upload = release["upload_url"].split("{")[0] + f"?name={ZIP_NAME}"
     asset = api(upload, secret, ZIP.read_bytes(), "application/zip", method="POST")
@@ -248,7 +248,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     steps = parser.add_subparsers(dest="step", required=True)
     steps.add_parser("check").add_argument("--sweep", action="store_true", help="every level chunk too (some 20 minutes)")
-    steps.add_parser("publish").add_argument("notes", help="the release's text: {commit} and {sha256} are filled in")
+    publishing = steps.add_parser("publish")
+    publishing.add_argument("notes", help="the release's text: {commit} and {sha256} are filled in")
+    publishing.add_argument("--preview", action="store_true", help="a preview (GitHub's pre-release), not the latest release")
     arguments = parser.parse_args()
     {"check": check, "publish": publish}[arguments.step](arguments)
 

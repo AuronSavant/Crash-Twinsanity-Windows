@@ -14,19 +14,23 @@ Windows needs, makes it run at a steady 60 fps, and fixes the crashes found by p
 
 ## Download
 
-The [releases](https://github.com/GioPixelGH/Crash-Twinsanity-Windows/releases) have `Crash-Twinsanity-Windows.zip` for
-64-bit Windows 10 and 11: unzip it anywhere, run `CrashTwinsanity.exe` in the `Crash Twinsanity` folder and pick your disc
-image. They're previews until someone has played the game through to the credits. Linux has no download yet: build it
-yourself ([native/LINUX.md](native/LINUX.md)).
+The [latest release](https://github.com/GioPixelGH/Crash-Twinsanity-Windows/releases/latest) has
+`Crash-Twinsanity-Windows.zip` for 64-bit Windows 10 and 11: unzip it anywhere, run `CrashTwinsanity.exe` in the
+`Crash Twinsanity` folder and pick your disc image. Version 1.0.8 is the first full release, now that the game has been
+played from the start to the credits; the ones before were previews. Linux has no download yet: build it yourself
+([native/LINUX.md](native/LINUX.md)).
 
 ## Status
 
 - **Tested on Windows 11** with an NVIDIA GeForce RTX 4070 SUPER, keyboard and mouse, and an Xbox One controller.
-- **Played by hand** from the start through the first boss and the caverns, into the Doc Amok levels.
+- **Played by hand from the start to the credits**, in Italian with an Xbox One controller, on the releases up to 1.0.7.
+  Every crash found on the way is fixed (the last ones: Slip Slide Icecapades' mines in 1.0.5, after beating Dingodile in
+  1.0.7).
 - **All 131 of the game's areas were tried** with scripted input for 30 seconds each, with no unexpected crash
   ([native/sweep/results_windows.md](native/sweep/results_windows.md)). 108 played (7 of them until a game over); the other
   23 can't be started on their own, because they are parts of hubs or tunnels only entered from a neighbouring area.
-- **Not done yet:** a full playthrough to the credits.
+- **Known issue:** a cutscene in the level after the caverns (Cortex running with the bees) froze once when it was played
+  again after dying, in an early version. It hasn't happened since 1.0.3, and it was never reproduced.
 - **Linux:** builds and plays on x86-64 (tried on Debian 13), and packs into an AppImage: see
   [native/LINUX.md](native/LINUX.md).
 - **macOS:** the platform code is HAB3X's and the Windows changes are kept apart (`_WIN32`), but this fork isn't built or

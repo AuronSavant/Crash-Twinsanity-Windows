@@ -256,18 +256,18 @@ local.json's.
 In a clone of the public repository with no changes of its own (a new script in native/tools aside):
 
     .venv\Scripts\python.exe native\tools\release_windows.py check [--sweep]
-    .venv\Scripts\python.exe native\tools\release_windows.py publish NOTES.md
+    .venv\Scripts\python.exe native\tools\release_windows.py publish NOTES.md [--preview]
 
 `check` pulls (and runs again when that brought a commit, so its checks are the pulled commit's), builds afresh
 (`build_windows.py --configure`), packages (`package_windows.py`) and checks the zip, unpacked: the program's version against
 native/CMakeLists.txt's; the DLLs it imports (Windows', SDL's and FFmpeg's only); its files against the last release's;
-check_windows.py's checks, with the pictures compared with the last release's program; and that the program has no 32-byte
-block of the game executable's data or VU microcode the last release's didn't (version 1.0.5 has 23 of the 3,832 that aren't
+check_windows.py's checks, with the pictures compared with the last release's program; and that the program has no 32-byte block
+of the game executable's data or VU microcode the last release's didn't (version 1.0.5 has 23 of the 3,832 that aren't
 repetitive, none of the microcode: runs of small integers, the standard library's tables, powers of ten and digits, and file
-names the decompilation's C++ spells out). It prints the commit and the zip's SHA-256. `publish`
-makes the release (`vVERSION`, a preview) from NOTES.md with `{commit}` and `{sha256}` filled in, uploads the zip, downloads
-it back and compares its SHA-256: only with the commit and the zip `check` checked, once that commit is on GitHub. GitHub's
-token is git's (`git credential fill`), never printed or kept.
+names the decompilation's C++ spells out). It prints the commit and the zip's SHA-256. `publish` makes the release (`vVERSION`;
+with `--preview` a preview, GitHub's pre-release, as every release before 1.0.8 was) from NOTES.md with `{commit}` and
+`{sha256}` filled in, uploads the zip, downloads it back and compares its SHA-256: only with the commit and the zip `check`
+checked, once that commit is on GitHub. GitHub's token is git's (`git credential fill`), never printed or kept.
 
 `package_windows.py` makes `build/native/dist/Crash Twinsanity/` and `Crash-Twinsanity-Windows.zip`: the program, the
 DLLs, the fonts, the licences and native/PLAYING_WINDOWS.md as README.txt. The program's icon is native/icon/AppIcon.ico
