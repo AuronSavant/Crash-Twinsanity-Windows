@@ -741,7 +741,29 @@ void TestControls()
     MouseLookStick(&x, &y);
     Check(y == 1.0f, "mouse look: Y inverted (%.2f)", y);
     SetOption(OptionInvertMouseY, 0);
+    // Past a sensitivity of 5 a flick pushes on past the stick's full deflection (the game's fastest turn): 2 at 6, 6 at 10
+    for (s32 sensitivity : {6, 10})
+    {
+        SetOption(OptionMouseSensitivity, sensitivity);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        MouseLookTestMotion(600.0f, 0.0f);
+        MouseLookStick(&x, &y);
+        Check(x == static_cast<f32>(4 - sensitivity), "mouse look: a flick at a sensitivity of %d pushes %.2f", sensitivity, -x);
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        MouseLookStick(&x, &y);
+    }
+
+    SetOption(OptionMouseSensitivity, 5);
     MouseLookForceForTest(false);
+    // The camera speed on the game's turn: 5 the game's own, 10 twice
+    f32 yaw = 1.0f;
+    f32 pitch = -1.0f;
+    ScaleCameraTurn(&yaw, &pitch, 0, 0);
+    Check(yaw == 1.0f && pitch == -1.0f, "camera speed 5: the game's turn (%.2f, %.2f)", yaw, pitch);
+    SetOption(OptionCameraSpeed, 10);
+    ScaleCameraTurn(&yaw, &pitch, 0, 0);
+    Check(yaw == 2.0f && pitch == -2.0f, "camera speed 10: twice the game's turn (%.2f, %.2f)", yaw, pitch);
+    SetOption(OptionCameraSpeed, 5);
 
     // Hold any button to skip: what's held as the scene begins is ignored, a fresh press held the hold's time skips, the skip is
     // reported briefly and the button still held is ignored after, a new scene starts after a gap. The times follow the hold's

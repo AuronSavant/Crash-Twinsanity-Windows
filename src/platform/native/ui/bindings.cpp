@@ -8,6 +8,7 @@
 #include "game/gamecontroller.h"
 #include "game/language.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -76,6 +77,9 @@ Binding g_Bindings[BindingCount];
 bool g_Read = false;
 bool g_Saving = true;
 SDL_Gamepad* g_LastGamepad = nullptr;
+// The mouse's push past the stick's full deflection this read, each axis (1: none): the camera's turn's boost (ScaleCameraTurn)
+f32 g_MouseBoostX = 1.0f;
+f32 g_MouseBoostY = 1.0f;
 
 std::string SettingsPath()
 {
@@ -428,6 +432,8 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
     g_LastGamepad = gamepad;
     *pad = {};
     pad->leftX = pad->leftY = pad->rightX = pad->rightY = BoundPad::StickMiddle;
+    g_MouseBoostX = 1.0f;
+    g_MouseBoostY = 1.0f;
     // Nothing reaches the game while the controls page waits for the key or button to bind
     if (Capturing() || SettingsOpen())
     {
@@ -576,34 +582,42 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
         // A stick pushed past half is the pad in use too
         auto pushed = [](u8 value) { return value < 0x40 || value > 0xC0; };
         gamepadUsed = gamepadUsed || pushed(rawLeftX) || pushed(rawLeftY) || pushed(rawRightX) || pushed(rawRightY);
-        // The accessibility settings: the sticks' dead zone (on top of the game's own), the camera's speed and inversion
+        // The accessibility settings: the sticks' dead zone (on top of the game's own) and the camera's inversion (its speed is
+        // ScaleCameraTurn's, on the game's turn)
         f32 deadZone = static_cast<f32>(GetOption(OptionStickDeadZone)) * 0.05f;
-        f32 cameraScale = static_cast<f32>(GetOption(OptionCameraSpeed)) / 5.0f;
         Squared(&rawLeftX, &rawLeftY);
         Squared(&rawRightX, &rawRightY);
         pad->leftX = Shaped(rawLeftX, deadZone, 1.0f, false);
         pad->leftY = Shaped(rawLeftY, deadZone, 1.0f, false);
-        pad->rightX = Shaped(rawRightX, deadZone, cameraScale, IsOn(OptionInvertCameraX));
-        pad->rightY = Shaped(rawRightY, deadZone, cameraScale, IsOn(OptionInvertCameraY));
+        pad->rightX = Shaped(rawRightX, deadZone, 1.0f, IsOn(OptionInvertCameraX));
+        pad->rightY = Shaped(rawRightY, deadZone, 1.0f, IsOn(OptionInvertCameraY));
     }
 
     // The prompts follow the device last used
     NoteInputDevice(keyboardUsed, gamepadUsed ? gamepad : nullptr, gamepad);
 
-    // The mouse's movement as the right stick in play: with the gamepad's, whichever pushes further
+    // The mouse's movement as the right stick in play: with the gamepad's, whichever pushes further. The stick ends at its full
+    // deflection: the mouse's push past it is the camera's turn's boost
     f32 mouseX = 0.0f;
     f32 mouseY = 0.0f;
     if (playing && MouseLookStick(&mouseX, &mouseY))
     {
         keyboardUsed = true;
         mouseX = IsOn(OptionInvertCameraX) ? -mouseX : mouseX;
-        auto further = [](u8 pad, f32 mouse)
+        auto further = [](u8 pad, f32 mouse, f32* boost)
         {
             f32 padPush = (static_cast<f32>(pad) - 128.0f) / 127.0f;
-            return std::fabs(mouse) > std::fabs(padPush) ? Clamp255(static_cast<int>(128.0f + mouse * 127.0f + 0.5f)) : pad;
+            if (std::fabs(mouse) <= std::fabs(padPush))
+            {
+                return pad;
+            }
+
+            *boost = std::max(1.0f, std::fabs(mouse));
+            f32 stick = std::clamp(mouse, -1.0f, 1.0f);
+            return Clamp255(static_cast<int>(128.0f + stick * 127.0f + 0.5f));
         };
-        pad->rightX = further(pad->rightX, mouseX);
-        pad->rightY = further(pad->rightY, mouseY);
+        pad->rightX = further(pad->rightX, mouseX, &g_MouseBoostX);
+        pad->rightY = further(pad->rightY, mouseY, &g_MouseBoostY);
     }
 
     // Left Ctrl toggles walking for the keys' movement (keyboard play runs by default)
@@ -636,11 +650,21 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
         KeySticks(IsOn(OptionInvertCameraX) ? -rightX : rightX, IsOn(OptionInvertCameraY) ? -rightY : rightY, &pad->rightX,
                   &pad->rightY);
         g_Walking = walking;
+        g_MouseBoostX = 1.0f;
+        g_MouseBoostY = 1.0f;
     }
     // The level sweep's, the save test's and the hints test's scripted input
     SweepInput(pad);
     SaveTestInput(pad);
     HintsTestInput(pad);
+}
+
+void ScaleCameraTurn(f32* yaw, f32* pitch, s32 currentYaw, u32 time)
+{
+    f32 speed = static_cast<f32>(GetOption(OptionCameraSpeed)) / static_cast<f32>(DefaultOption(OptionCameraSpeed));
+    *yaw *= speed * g_MouseBoostX;
+    *pitch *= speed * g_MouseBoostY;
+    LookTestCamera(currentYaw, time);
 }
 
 void KeyName(s32 key, char* out, u32 size)

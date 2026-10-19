@@ -70,6 +70,14 @@ The defaults (`src/platform/native/ui/bindings.cpp`, `Infos`; rebound on the opt
   least 0.2 once the mouse moves (the game's own dead zone swallows less), and 1 for a flick. With no motion an axis falls back to
   the middle within 50 ms, so it never drifts. A gamepad's right stick and the mouse are both read and the larger deflection on
   each axis wins; the arrows override both. The camera's invert X applies to the mouse too.
+- The camera's fastest turn (issue #6): the follow camera turns at its input times 120 degrees a second across and 60 up and down
+  (`g_RigYawInputSpeed`, `g_RigPitchInputSpeed`), its input the stick's deflection, so a stick (or a mouse as one) can't turn it
+  faster than that; the sensitivity only made the mouse reach it sooner (at 10, from 240 points a second). Past a sensitivity of 5
+  the mouse now pushes on past the full deflection, up to 2 at 6 and 6 at 10 (720 degrees a second across): the stick's byte
+  stays at its end and the part past it goes to the game's turn (`ScaleCameraTurn`, from `FollowCameraRig::Frame` under
+  TWIN_NATIVE: the yaw's and pitch's inputs times it). Up to 5 nothing changed. The camera speed setting (Accessibility, 1-10, 5
+  the game's) is a multiplier on that same turn, for the gamepad's stick, the mouse and the arrows (it used to scale the
+  gamepad's stick alone, which tops out at the same 120 degrees). `$TWIN_LOOK_TEST` measures it in the game (WINDOWS.md).
 - Prompts: with the keyboard in use, a key on a mouse button shows as a keycap with the mouse drawn on it and that button lit
   (`mouseart.cpp`): the options' footer and descriptions, the Controls table (the mouse beside its name), and the game's own hints
   (their glyph drawn as the mouse through `NativeGraphicsSetGlyphImage`, as the Xbox's art is).
@@ -83,7 +91,8 @@ The defaults (`src/platform/native/ui/bindings.cpp`, `Infos`; rebound on the opt
   (`DrawGameMenuChrome`, settingsview.cpp). The mouse clicks the game's own: select, back, and an arrow turns the pause's pages
   as L1 and R1 do (mouse.cpp).
 - `--selftest-ui` checks the defaults, WASD's diagonal, the mouse keys' names, mouse look's push (a flick saturates, a slow move
-  pushes a little, back to the middle with no motion, Y inverted) and the skip below.
+  pushes a little, back to the middle with no motion, Y inverted, a flick past the full deflection at 6 and 10), the camera speed
+  on the game's turn and the skip below.
 
 Cutscenes and movies: "hold any button to skip" (the cutscene skip option, `OptionSkipCutscenes`, is the master switch;
 `ui/features.cpp`). Any key, mouse button or pad button (the triggers too) held 0.6 s, timed rather than counted in frames,

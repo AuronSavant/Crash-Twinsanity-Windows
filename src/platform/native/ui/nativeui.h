@@ -436,6 +436,10 @@ void DrawAfterOleg(Renderer* renderer);
 bool TakeSelectedMenuLine(f32* left, f32* top, f32* right, f32* bottom);
 // The camera's shake scale (the accessibility setting: 1, or 0 with it off)
 f32 CameraShakeScale();
+// The follow camera's turn from the right stick (FollowCameraRig::Frame): its yaw's and pitch's inputs times the camera speed
+// setting (5: the game's own) and the mouse's push past the stick's full deflection (bindings.cpp: a mouse sensitivity over 5),
+// so the camera can turn faster than the game's fastest; its yaw and its clock's time noted for the mouse look test
+void ScaleCameraTurn(f32* yaw, f32* pitch, s32 currentYaw, u32 time);
 // The game's screen position page went back: true when the settings opened it (they're shown again)
 bool ScreenPositionClosed();
 void SettingsActForTest(u32 action);

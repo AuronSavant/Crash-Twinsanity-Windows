@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The checks a change needs before it's committed (native/WINDOWS.md, "Checking a change"), each summed up in a line: the
-self-tests, the places that once crashed played again, the pictures against another build's and, with --sweep, every level
-chunk against the last sweep's results. The runs' logs and pictures go to build/native/check/.
+self-tests, the places that once crashed played again, the pause menu's hints, the camera turned by the mouse, the pictures
+against another build's and, with --sweep, every level chunk against the last sweep's results. The runs' logs and pictures go to build/native/check/.
 
     .venv\\Scripts\\python.exe native\\tools\\check_windows.py [--build] [--exe PATH] [--reference PATH] [--sweep]
 
@@ -126,6 +126,17 @@ def menu_hints(exe, work, shots=None):
         return name, status == 0 and last.startswith("pass"), f"{last}; {hints}"
     with ThreadPoolExecutor(1 if shots else 2) as pool:
         return list(pool.map(one, HINTS))
+
+
+def mouse_look(exe, work):
+    """The camera turned by the mouse (looktest.cpp): the defaults at the stick's full deflection (the game's fastest turn), a
+    sensitivity of 10 six times that, a camera speed of 10 twice: (passed, what happened)"""
+    status, log = run_game(exe, work / "look", ["--quick", "--headless"], {"TWIN_LOOK_TEST": "1"}, timeout=300,
+                           options="pause_on_focus_loss=0\n")
+    lines = [line.split("look test: ", 1)[1] for line in log.splitlines() if "look test: " in line]
+    turns = [line.split(": ", 1)[1].replace(" degrees a second", "") for line in lines if line.startswith("sensitivity")]
+    last = lines[-1] if lines else f"exit {status}, no result"
+    return status == 0 and last == "pass", f"{last} ({', '.join(turns)} degrees a second)"
 
 
 def pictures(exe, reference, work, last=2500, every=100):
@@ -254,6 +265,10 @@ def report(exe, reference, work, with_sweep, reference_name=None):
         if not ok:
             failed = True
             print(f"  FAILED {name}: {what}")
+
+    looked, what = mouse_look(exe, work)
+    print(f"mouse look      {'ok' if looked else 'FAILED'}: {what}")
+    failed |= not looked
 
     if reference and reference.exists():
         same, different = pictures(exe, reference, work)

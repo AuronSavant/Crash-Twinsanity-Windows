@@ -184,9 +184,10 @@ A line a check, the logs and pictures in `build/native/check/`, exit 1 when one 
 once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles; Dingodile beaten, then the boiler room's lock and the
 Academy's hub), each failing on a crash and on the log's signs of memory gone wrong (the disk manager's pool out of room, DMA
 reading memory that isn't there); the pause menu's hints (its `HINTS`: the game's own with a PlayStation pad's, an Xbox pad's,
-a Nintendo pad's and the keyboard's prompts, and the bar), each shown as the menu hints option has them and the game's own clicked with the
-mouse (`$TWIN_HINTS_TEST`, below); the beach's first 2,500 frames at a fixed time, every 100th picture compared byte for byte
-with the last packaged build's (`build/native/dist/`, or `--reference PROGRAM`); with `--sweep`, every level chunk, its outcome
+a Nintendo pad's and the keyboard's prompts, and the bar), each shown as the menu hints option has them and the game's own
+clicked with the mouse (`$TWIN_HINTS_TEST`, below); the camera turned by the mouse (`$TWIN_LOOK_TEST`, below); the beach's
+first 2,500 frames at a fixed time, every 100th picture compared byte for byte with the last packaged build's
+(`build/native/dist/`, or `--reference PROGRAM`); with `--sweep`, every level chunk, its outcome
 against `native/sweep/results_windows.json` (a run that went on and one that ended in a game over count alike: the scripted
 input decides which). Some 3 minutes, 25 more with the sweep. Each run has a settings folder of its own; the disc image is
 local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, and saves the pause menu's pictures there.
@@ -257,6 +258,10 @@ local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, 
   keyboard` picks the controller), then the mouse clicks the pages' right and left arrows and back; "hints test: pass" and exit 0.
   `$TWIN_HINTS_TEST=FOLDER` without `--headless` also saves the window as it's shown (the picture and the overlay:
   `NativeGraphicsShootWindow`) there: hints_pause.png and hints_levels.png.
+- `$TWIN_LOOK_TEST=1` (with `--quick`, ui/looktest.cpp): the beach played a few seconds, then the mouse moved right at a steady
+  3000 points a second (mouse look holding it without a window, headless too) with the mouse sensitivity and camera speed at 5
+  and 5, 10 and 5, 5 and 10, the follow camera's turn measured over a second of its clock: the stick's full deflection's 120
+  degrees a second at the defaults (the game's fastest), six times that, twice; "look test: pass" and exit 0.
 
 ## Releasing
 

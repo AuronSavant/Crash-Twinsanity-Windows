@@ -302,6 +302,7 @@ void Frame()
     SweepFrame();
     SaveTestFrame();
     HintsTestFrame();
+    LookTestFrame();
     SettingsShotsFrame();
     MouseFrame();
     ApplyGameSettingsOnce();

@@ -61,7 +61,9 @@ A controller (Xbox, PlayStation, Switch and most others) works out of the box, a
 
 Everything can be rebound in **Options > Controls**; the button prompts follow what you last used. Mouse look, its sensitivity
 and inverted Y are there too, and **Menu hints**: the menus' own hints as the game draws them (the default, their buttons the
-controller's, and clickable), or a bar of prompts at the bottom.
+controller's, and clickable), or a bar of prompts at the bottom. Up to a sensitivity of 5 (the default) the mouse turns the
+camera at most as fast as a stick does, as the PS2 did; above 5 a quick move turns it faster (up to six times at 10). **Camera
+speed** (Options > Accessibility) makes the camera turn faster or slower for the mouse, a controller and the keys alike.
 
 ## Options
 

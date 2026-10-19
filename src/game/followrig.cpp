@@ -14,6 +14,7 @@
 
 #ifdef TWIN_NATIVE
 #include "fixes.h"
+#include "ui/nativeui.h"
 #endif
 
 EABI_EXPORT(FUN_00142af8, &FollowCameraRig::RollerbrawlYaw);
@@ -251,7 +252,7 @@ void FollowCameraRig::ReadPad(GamePad* pad)
     pressures[PressureDistance] = bindings.Pressure(pad, PressureDistance);
 }
 
-void FollowCameraRig::Frame(TimeClock*, CharacterAgent* character)
+void FollowCameraRig::Frame(TimeClock* clock, CharacterAgent* character)
 {
     FollowCameraPositioner& positioner = ownPositioner;
     Vehicle* vehicle = character->vehicle;
@@ -270,6 +271,10 @@ void FollowCameraRig::Frame(TimeClock*, CharacterAgent* character)
         positioner.pitch.input = axes[AxisLookY];
         positioner.yaw.input = -axes[AxisLookX];
         positioner.distance.input = -axes[AxisZoom];
+#ifdef TWIN_NATIVE
+        // The camera speed setting, and the mouse turning it faster than the stick's full deflection (ui/bindings.cpp)
+        NativeUi::ScaleCameraTurn(&positioner.yaw.input, &positioner.pitch.input, positioner.yaw.current, clock->time);
+#endif
     }
     else
     {

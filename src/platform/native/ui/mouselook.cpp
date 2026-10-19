@@ -3,7 +3,9 @@
 // window holds the mouse in SDL's relative mode, the cursor hidden; anywhere else the mouse is free for the menus' cursor.
 // Each of the pad's reads turns the motion since the last one into the stick's deflection: the speed (points a second) over the
 // sensitivity's full-deflection speed, so a slow move is a small push and a flick saturates; with no motion it falls back to the
-// middle within 50 ms, so it never drifts
+// middle within 50 ms, so it never drifts. The stick's full deflection is the game's fastest turn (120 degrees a second across,
+// 60 up and down): up to a sensitivity of 5 the mouse tops out there as the stick does, past 5 it pushes on past it (2 at 6 ...
+// 6 at 10), the part past 1 the camera's turn's boost (bindings.cpp, ScaleCameraTurn)
 #include "ui/bindings.h"
 
 #include "native.h"
@@ -40,6 +42,8 @@ bool g_WheelHeld[2] = {};
 
 // The sensitivity's full deflection: 2400 points a second over the setting (5: 480 points a second)
 constexpr f32 FullSpeedAtOne = 2400.0f;
+// The highest sensitivity that tops out at the stick's full deflection; each step past it a full deflection more
+constexpr s32 StickSensitivity = 5;
 // The game's own stick dead zone swallows small pushes: a moving mouse pushes at least this far
 constexpr f32 LeastPush = 0.2f;
 constexpr f32 DecaySeconds = 0.05f;
@@ -101,10 +105,10 @@ bool Playing()
     return bars != Widget::StateAppearing && bars != Widget::StateShown && bars != Widget::StateDisappearing;
 }
 
-f32 Push(f32 delta, f32 seconds, f32 fullSpeed)
+f32 Push(f32 delta, f32 seconds, f32 fullSpeed, f32 most)
 {
     f32 speed = std::fabs(delta) / seconds;
-    f32 push = std::min(1.0f, LeastPush + (1.0f - LeastPush) * speed / fullSpeed);
+    f32 push = std::min(most, LeastPush + (1.0f - LeastPush) * speed / fullSpeed);
     return delta < 0.0f ? -push : push;
 }
 }
@@ -148,15 +152,16 @@ void MouseLookFrame()
         g_WheelDown = 0;
     }
 
-    // The window holds the mouse in play with mouse look on, in front (headless: never)
+    // The window holds the mouse in play with mouse look on, in front (headless: never; the look test's motion without a window)
     SDL_Window* focus = SDL_GetKeyboardFocus();
-    bool want = playing && IsOn(OptionMouseLook) && focus != nullptr && !Native::GetSettings().headless;
+    bool scripted = LookTestActive();
+    bool want = playing && IsOn(OptionMouseLook) && (scripted || (focus != nullptr && !Native::GetSettings().headless));
     if (want == g_Relative)
     {
         return;
     }
 
-    if (want)
+    if (want && !scripted)
     {
         g_Window = focus;
         SDL_SetWindowRelativeMouseMode(g_Window, true);
@@ -164,6 +169,7 @@ void MouseLookFrame()
     else if (g_Window != nullptr)
     {
         SDL_SetWindowRelativeMouseMode(g_Window, false);
+        g_Window = nullptr;
     }
 
     g_DeltaX = 0.0f;
@@ -196,12 +202,13 @@ bool MouseLookStick(f32* x, f32* y)
         return false;
     }
 
-    f32 sensitivity = static_cast<f32>(std::max<s32>(1, GetOption(OptionMouseSensitivity)));
-    f32 fullSpeed = FullSpeedAtOne / sensitivity;
+    s32 sensitivity = std::max<s32>(1, GetOption(OptionMouseSensitivity));
+    f32 fullSpeed = FullSpeedAtOne / static_cast<f32>(sensitivity);
+    f32 most = static_cast<f32>(std::max<s32>(1, sensitivity - StickSensitivity + 1));
     // Each axis by its own motion; an axis without any falls back to the middle
     f32 decay = std::max(0.0f, 1.0f - seconds / DecaySeconds);
-    g_StickX = dx != 0.0f ? Push(dx, seconds, fullSpeed) : g_StickX * decay;
-    g_StickY = dy != 0.0f ? Push(dy, seconds, fullSpeed) : g_StickY * decay;
+    g_StickX = dx != 0.0f ? Push(dx, seconds, fullSpeed, most) : g_StickX * decay;
+    g_StickY = dy != 0.0f ? Push(dy, seconds, fullSpeed, most) : g_StickY * decay;
     if (std::fabs(g_StickX) < 0.01f)
     {
         g_StickX = 0.0f;

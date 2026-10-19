@@ -150,10 +150,16 @@ void SaveTestInput(BoundPad* pad);
 // The game's menus' hints test ($TWIN_HINTS_TEST, hintstest.cpp): its frame and its scripted start
 void HintsTestFrame();
 void HintsTestInput(BoundPad* pad);
+// The mouse look test ($TWIN_LOOK_TEST, looktest.cpp): whether it runs (mouse look then holds the mouse without a window), its
+// frame (the scripted motion) and the follow camera's yaw and clock (ScaleCameraTurn's)
+bool LookTestActive();
+void LookTestFrame();
+void LookTestCamera(s32 yaw, u32 time);
 
 // The mouse in play (mouselook.cpp): its events watched (once), the window holding the mouse in relative mode while the game is
 // played with mouse look on (a game frame's check), whether it holds it, the right stick's deflection from the motion since the
-// last read (-1 to 1 each; false: none), the wheel's keys held this read; and the tests' motion and relative mode
+// last read (-1 to 1 each, past 1 with a sensitivity over 5: the camera's turn's boost; false: none), the wheel's keys held this
+// read; and the tests' motion and relative mode
 void StartMouseLook();
 void MouseLookFrame();
 bool MouseLookActive();
