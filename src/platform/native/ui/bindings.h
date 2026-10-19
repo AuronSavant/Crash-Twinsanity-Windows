@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-
+struct InstanceContext;
 class MenuPage;
 struct MenuInput;
 
@@ -141,6 +141,9 @@ bool SweepActive();
 // fromPads: the pads' read's call (time only; the game controller's counts the frames)
 void SweepFrame(bool fromPads = false);
 void SweepInput(BoundPad* pad);
+// The player put a height above the nearest live instance of its chunk whose object's name holds a text (any case; the physics
+// test's): whether there's one
+bool PutPlayerAbove(InstanceContext* player, const char* name, f32 height);
 // The save and load test (savetest.cpp, $TWIN_SAVE_TEST=save|load): whether it runs, its frame, its menu step (a wanted item
 // selected: true) and its input
 bool SaveTestActive();
@@ -155,6 +158,9 @@ void HintsTestInput(BoundPad* pad);
 bool LookTestActive();
 void LookTestFrame();
 void LookTestCamera(s32 yaw, u32 time);
+// The physics test ($TWIN_PHYSICS_TEST, physicstest.cpp): its frame (the measures, the trace) and its scripted moves
+void PhysicsTestFrame();
+void PhysicsTestInput(BoundPad* pad);
 
 // The mouse in play (mouselook.cpp): its events watched (once), the window holding the mouse in relative mode while the game is
 // played with mouse look on (a game frame's check), whether it holds it, the right stick's deflection from the motion since the

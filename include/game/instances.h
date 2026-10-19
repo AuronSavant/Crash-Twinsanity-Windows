@@ -369,13 +369,19 @@ union MovementNodeBits
         u32 carries : 1;
         // Its matrices are captured for the frame
         u32 captured : 1;
+#ifdef TWIN_NATIVE
+        // Natively, its clock's advance at its last update (0: none, captured anew): the frame its instance's move since was made in
+        u32 lastAdvance : 30;
+#else
         u32 unused2 : 30;
+#endif
     };
 };
 CHECK_SIZE(MovementNodeBits, 4);
 
-// An instance's movement node (kind 0, retail vtable UnkMatricesNode__Methods): the seconds between its two places, its bits and
-// its place's matrix a frame before and now (its update moves the one it had into the first)
+// An instance's movement node (kind 0, retail vtable UnkMatricesNode__Methods): the seconds between its two places (natively the
+// seconds of the frame the move between them was made in), its bits and its place's matrix a frame before and now (its update moves
+// the one it had into the first)
 struct MovementNode : GameNode
 {
     static constexpr u32 ClassId = 0x1309;
@@ -391,7 +397,8 @@ struct MovementNode : GameNode
     f32 Seconds() RETAIL(FUN_00192b80);
     void Capture() RETAIL(CaptureMovementNodeTransform);
     // Its vtable's destructor and update: while its clock runs and they're captured, the place it had is the one before and its
-    // instance's place now the new one, the seconds the clock's last advance (captured anew otherwise), then the base's update
+    // instance's place now the new one, the seconds the clock's last advance (natively the one before: the frame its instance moved
+    // in; captured anew otherwise), then the base's update
     void Destroy(u32 destroyFlags) RETAIL(FUN_001929d8);
     u32 Update(TimeClock* clock) RETAIL(FUN_00192a00);
     // Its kind and its class (its vtable's functions 5 and 10)

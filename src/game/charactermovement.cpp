@@ -204,6 +204,8 @@ void CharacterAgent::MeasureVelocity(f32 vertical, u32 measured)
         Vector4 position;
         Position(&position);
         Vector4 moved = {position.x - last.x, position.y - last.y, position.z - last.z, 1.0f};
+        // The move since its last frame's step over the seconds its movement node gives (natively those of the frame the step was
+        // made in: MovementNode::Update)
         f32 inverse = 1.0f / movement->Seconds();
         velocity.x = moved.x * inverse;
         velocity.z = moved.z * inverse;
@@ -689,6 +691,18 @@ void CharacterAgent::Move(f32 seconds, CharacterPart* part, u32 controlled)
     step.x *= seconds;
     step.y *= seconds;
     step.z *= seconds;
+#ifdef TWIN_NATIVE
+    // The gravity is added to the velocity before the step, so a step of h seconds comes down g*h*h/2 further than the curve
+    // through it: the PS2's 60 Hz jumps are that much lower than shorter steps make them (2.14 high, 2.22 at 240 Hz). Past 60 Hz,
+    // what a 60th of a second's step would have come down more is added to each step in the air, so they fall as at 60 Hz
+    if (FramesPast60() && part->flags.onGround == 0 && part->flags.resting != 0)
+    {
+        f32 more = part->gravity * (SecondsPerFrame - seconds) * seconds * 0.5f;
+        step.x += g_AgentDown.x * more;
+        step.y += g_AgentDown.y * more;
+        step.z += g_AgentDown.z * more;
+    }
+#endif
     u32 mode = MoveModeOf();
     f32 turnOut;
     if (part->moveBits.linkedFirst != 0)

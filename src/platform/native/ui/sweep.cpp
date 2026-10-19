@@ -138,6 +138,36 @@ void VisitInstance(InstanceContext* instance, void* user)
     }
 }
 
+}
+
+bool PutPlayerAbove(InstanceContext* player, const char* name, f32 height)
+{
+    std::string wanted = name;
+    std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return std::tolower(c); });
+    ObjectPlace* place = player->place;
+    place->SyncPosition();
+    InstanceSearch search = {player->chunk, player, wanted, place->position, nullptr, 0.0f};
+    ForEachLiveInstance(VisitInstance, &search);
+    if (search.found == nullptr)
+    {
+        return false;
+    }
+
+    Vector4 to = search.found->place->position;
+    to.y += height;
+    to.w = 1.0f;
+    Native::Log("physics test: the player put %.1f above %s at (%.1f, %.1f, %.1f)", height, ObjectNameOf(search.found),
+                search.found->place->position.x, search.found->place->position.y, search.found->place->position.z);
+    if (place->MoveTo(&to))
+    {
+        QueueObject(player);
+    }
+
+    return true;
+}
+
+namespace
+{
 // The live instances of a chunk whose object's name holds a text (any case; none: every one): the scripts and state steps'
 struct InstanceList
 {

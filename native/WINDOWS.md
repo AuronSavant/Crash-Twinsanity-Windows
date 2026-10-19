@@ -120,6 +120,22 @@ as at 60 Hz once a frame, so effects last as long and are as dense; the particle
 movies keep the sound processor's clock. Unlimited, with v-sync off, ran at about 140 frames a second on the beach, 123 at the
 first boss's and 91 on the Totem's beach (the heaviest) on the i7-8700K it was measured on.
 
+The physics play as at 60 Hz too (issues #7 and #8). Past 60 Hz a computer's frames are uneven, a slow one now and then among the
+fast ones, and the game measured velocities from the last frame's move over this frame's time: a movement node (movementnode.cpp)
+is updated before its instance moves, so the move between its two places was made in the last frame, and retail divided it by this
+frame's advance. At a steady rate that's the same; a short frame after a long one made the velocity several times too fast (a 40th
+of a second's move over a 240th: six times). A jump takes off with the character's measured velocity
+(`CharacterAgent::MeasureVelocity`), so a jump after a slow frame went several times as far (at 144 Hz with a 60 Hz frame now and
+then the slide jump went 20.8 instead of 9); and the tied characters' swing takes the vertical velocity of what it stands on, which
+the leader takes when the swing is above it (`SolveLinked`), so Crash stepping off Cavern Catastrophe's rising lift with Cortex on
+it was thrown up as high as the frames happened to make it. Natively the node divides by the advance of the frame the move was
+made in, its last update's (`MovementNodeBits::lastAdvance`, in bits retail leaves unused): the same as retail at a steady rate,
+so the 60 Hz pictures are the PS2's still. And past 60 Hz the character's fall makes up for its shorter steps: the gravity is added
+to the velocity before the step, so each of 60 Hz's steps comes down g·h²/2 further than the curve and its jumps are 3 to 4%
+lower than shorter steps make them (2.14 high, 2.22 at 240 Hz); each step in the air past 60 Hz comes down what a 60th's would have
+more (`CharacterAgent::Move`, `FramesPast60`). 50 Hz stays the European PS2's. check_windows.py's physics check measures it:
+`$TWIN_PHYSICS_TEST` (below) at a 144 Hz and a 240 Hz screen's uneven frames against 60 Hz's.
+
 ## A runaway VU program
 
 VU1's model program (the one at address 0: a list of commands, each a handler) never ended in some frames: after Crash dies on
@@ -185,12 +201,16 @@ once crashed played again (its `SCENARIOS`: Slip Slide's mine cradles; Dingodile
 Academy's hub), each failing on a crash and on the log's signs of memory gone wrong (the disk manager's pool out of room, DMA
 reading memory that isn't there); the pause menu's hints (its `HINTS`: the game's own with a PlayStation pad's, an Xbox pad's,
 a Nintendo pad's and the keyboard's prompts, and the bar), each shown as the menu hints option has them and the game's own
-clicked with the mouse (`$TWIN_HINTS_TEST`, below); the camera turned by the mouse (`$TWIN_LOOK_TEST`, below); the beach's
+clicked with the mouse (`$TWIN_HINTS_TEST`, below); the camera turned by the mouse (`$TWIN_LOOK_TEST`, below); the physics past
+60 Hz (its `PHYSICS_RATES`, `$TWIN_PHYSICS_TEST`, below): the beach's jumps and Crash stepping off Cavern Catastrophe's lift with
+Cortex tied, at a 144 Hz and a 240 Hz screen's uneven frames, against 60 Hz's (a jump's distance within 6%, its height within 2%,
+its time in the air within 0.05 s, the lift's hop within 0.15); the beach's
 first 2,500 frames at a fixed time, every 100th picture compared byte for byte with the last packaged build's
 (`build/native/dist/`, or `--reference PROGRAM`); with `--sweep`, every level chunk, its outcome
 against `native/sweep/results_windows.json` (a run that went on and one that ended in a game over count alike: the scripted
-input decides which). Some 3 minutes, 25 more with the sweep. Each run has a settings folder of its own; the disc image is
-local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, and saves the pause menu's pictures there.
+input decides which). Some 4 minutes, 25 more with the sweep. Each run has a settings folder of its own; the disc image is
+local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, and saves the pause menu's pictures there;
+`--physics` only the physics' (a minute or so).
 
 ## Debugging
 
@@ -216,6 +236,8 @@ local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, 
   picture as a PNG), two builds' pictures can be compared frame by frame; with `$TWINSANITY_AUDIO=frames` too, runs agree
   frame for frame (the sound in real time changes a run after some 700 frames). The pictures are at the render scale: with no
   `resolution.txt` in the run's settings, the default 2x (4x before version 1.0.4), so compare builds at the same scale.
+  `$TWIN_FIXED_TIME=144,144,60`: the frames' rates in turn instead (a 144 Hz screen's with a slow frame now and then: the uneven
+  frames past 60 Hz, the same every run).
 - `$TWIN_FRAME_STATS`: each frame's time, VU1's work, the primitives, the render thread's time and the GPU renderer's batches, texture decodes, uploads, downloads and copies.
 - The log: each line `[native] [SECONDS]` from the start. The game's trail (ui/trail.cpp) is always in it: the game controller's
   states by name with the player's place (read without changing the game's), the player's chunk as it changes, the chunk a level
@@ -262,6 +284,16 @@ local.json's. `--hints-shots FOLDER` runs only the hints' check, with a window, 
   3000 points a second (mouse look holding it without a window, headless too) with the mouse sensitivity and camera speed at 5
   and 5, 10 and 5, 5 and 10, the follow camera's turn measured over a second of its clock: the stick's full deflection's 120
   degrees a second at the defaults (the game's fastest), six times that, twice; "look test: pass" and exit 0.
+- `$TWIN_PHYSICS_TEST` (ui/physicstest.cpp): the player's moves measured by the game clock, to compare frame rates (with
+  `$TWIN_FIXED_TIME`'s frames). `jumps` (with `--quick`): from where play stands after 3 s, the player put back there before each,
+  a standing jump, a running jump, a slide jump, a jump and spin and a double jump the same way in the world (the camera's way, or
+  `$TWIN_PHYSICS_WAY=DEGREES` round from it; the check takes -90, the beach's flat way; `$TWIN_PHYSICS_MOVES=013` only those,
+  as for Crash and Cortex tied, who have no slide: tunnel01 with `$TWIN_PHYSICS_TIED`, way 0), each
+  logged with its time in the air, its distance along the ground and its height. `watch`, or `step[:SECONDS]` (the stick pushed
+  `$TWIN_PHYSICS_WAY`'s way first): every time the player leaves the ground, as it lands; with the level sweep to start a chunk
+  (`$TWIN_SWEEP_LEVEL`, `$TWIN_SWEEP_IDLE`), `$TWIN_PHYSICS_ON=NAME` (the player put on an instance 2 s in: `cavern_lift17`),
+  `$TWIN_PHYSICS_TIED` (Cortex tied to it) and `$TWIN_PHYSICS_SECONDS` (the watch's end). `$TWIN_PHYSICS_TRACE=FILE`: every
+  frame's place, velocity, ground and movement node's velocity as CSV.
 
 ## Releasing
 

@@ -104,3 +104,9 @@ extern "C"
     // Whether the frame has seconds left for more work, counting from its start
     bool GameTimeHasTimeLeft(f32 seconds, GameTimeController* controller) RETAIL_N32(FUN_00192360);
 }
+
+#ifdef TWIN_NATIVE
+// Natively, whether the frames are past the PS2's 60 a second (Options > Display's 120 Hz, 144 Hz and unlimited: the game clock's
+// frames a second): the character's steps then make up for being shorter than 60 Hz's (CharacterAgent::Move)
+bool FramesPast60();
+#endif

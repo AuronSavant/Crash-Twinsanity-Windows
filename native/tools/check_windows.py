@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """The checks a change needs before it's committed (native/WINDOWS.md, "Checking a change"), each summed up in a line: the
-self-tests, the places that once crashed played again, the pause menu's hints, the camera turned by the mouse, the pictures
-against another build's and, with --sweep, every level chunk against the last sweep's results. The runs' logs and pictures go to build/native/check/.
+self-tests, the places that once crashed played again, the pause menu's hints, the camera turned by the mouse, the physics past
+60 Hz against 60 Hz's, the pictures against another build's and, with --sweep, every level chunk against the last sweep's results.
+The runs' logs and pictures go to build/native/check/.
 
     .venv\\Scripts\\python.exe native\\tools\\check_windows.py [--build] [--exe PATH] [--reference PATH] [--sweep]
 
 --build builds first (build_windows.py). The program checked is build/native/cmake/CrashTwinsanity.exe unless --exe says;
 the pictures are compared with --reference's (by default the last packaged build's, build/native/dist/). Every run has a
-settings folder of its own (none of the player's), and the disc image is local.json's. Exits 1 when a check fails.
+settings folder of its own (none of the player's), and the disc image is local.json's. Exits 1 when a check fails. --physics
+runs only the physics' check.
 """
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +40,15 @@ HINTS = [("playstation", 0), ("xbox", 0), ("switch", 0), ("keyboard", 0), ("xbox
 # What a scenario's log mustn't have besides a crash: the disk manager's pool out of room (game/disk.cpp), and DMA reading
 # memory that isn't there (what a texture's data overwritten looks like before the crash)
 MEMORY_PROBLEMS = ["disk: no room", "reads from no memory"]
+# The physics past 60 Hz against 60 Hz's (physicstest.cpp; native/WINDOWS.md, "Frame rates past 60"), each rate's name, its frames
+# ($TWIN_FIXED_TIME: "144,144,60" a 144 Hz screen's with a slow frame now and then) and the refresh option (options.txt's
+# refresh_60hz: 1 60 Hz, 4 unlimited), 60 Hz's first. Played at each: the beach's jumps (issue #7: the slide jump twice as
+# long), and Crash stepping off Cavern Catastrophe's first lift as it rises with Cortex tied to him (issue #8: thrown up)
+PHYSICS_RATES = [("60 Hz", "60", 1), ("144 Hz uneven", "144,144,60", 4), ("240 Hz uneven", "240,240,240,40", 4)]
+# How far from 60 Hz's a measure may be, a share of it and at least so much: a jump's distance along the ground, its height and its
+# time in the air (seconds: 60 Hz's frames measure it in 60ths), and the lift's hop (its height)
+PHYSICS_TOLERANCE = {"along": (0.06, 0.2), "high": (0.02, 0.05), "air": (0.0, 0.05), "hop": (0.0, 0.15)}
+LIFT_CHUNK = "Levels\\Earth\\Cavern\\nitrocav"
 
 
 def disc_image(root=HERE):
@@ -139,6 +151,72 @@ def mouse_look(exe, work):
     return status == 0 and last == "pass", f"{last} ({', '.join(turns)} degrees a second)"
 
 
+def physics(exe, work):
+    """The jumps and the lift's hop at each of PHYSICS_RATES (physicstest.cpp) against 60 Hz's: [(name, passed, what happened)]"""
+    def jumps(rate):
+        name, frames, refresh = rate
+        status, log = run_game(exe, work / f"physics-jumps-{frames.replace(',', '-')}", ["--quick", "--headless", "--quiet-stubs"],
+                               {"TWIN_PHYSICS_TEST": "jumps", "TWIN_FIXED_TIME": frames, "TWIN_PHYSICS_WAY": "-90"}, timeout=900,
+                               options=f"refresh_60hz={refresh}\npause_on_focus_loss=0\n")
+        lines = [line.split("physics test: ", 1)[1] for line in log.splitlines() if "physics test: " in line]
+        moves = {}
+        for line in lines:
+            measure = re.match(r"(.+): ([\d.]+) s in the air, ([\d.]+) along the ground, ([\d.]+) high", line)
+            if measure:
+                moves[measure[1]] = {"air": float(measure[2]), "along": float(measure[3]), "high": float(measure[4])}
+        last = lines[-1] if lines else f"exit {status}, no result"
+        return moves if status == 0 and last == "done" else last
+
+    def lift(rate):
+        name, frames, refresh = rate
+        status, log = run_game(exe, work / f"physics-lift-{frames.replace(',', '-')}", ["--headless", "--quiet-stubs"],
+                               {"TWIN_SWEEP_LEVEL": LIFT_CHUNK, "TWIN_SWEEP_SECONDS": "600", "TWIN_SWEEP_TIMEOUT": "180",
+                                "TWIN_SWEEP_IDLE": "1", "TWIN_PHYSICS_TEST": "step:0.3", "TWIN_PHYSICS_WAY": "90",
+                                "TWIN_PHYSICS_ON": "cavern_lift17", "TWIN_PHYSICS_TIED": "1", "TWIN_PHYSICS_SECONDS": "8",
+                                "TWIN_FIXED_TIME": frames}, timeout=600, options=f"refresh_60hz={refresh}\npause_on_focus_loss=0\n")
+        lines = [line.split("physics test: ", 1)[1] for line in log.splitlines() if "physics test: " in line]
+        hops = [float(hop[1]) for line in lines for hop in [re.match(r"off the ground [\d.]+ s, ([\d.]+) high", line)] if hop]
+        if status != 0 or "watched" not in lines or "the player tied to the second" not in lines or not hops:
+            return f"exit {status}: {lines[-1] if lines else 'no result'}"
+        return max(hops)
+
+    def allowed(kind, value):
+        share, least = PHYSICS_TOLERANCE[kind]
+        return max(share * value, least)
+
+    with ThreadPoolExecutor(3) as pool:
+        jumping = [pool.submit(jumps, rate) for rate in PHYSICS_RATES]
+        lifting = [pool.submit(lift, rate) for rate in PHYSICS_RATES]
+        jumped = [future.result() for future in jumping]
+        lifted = [future.result() for future in lifting]
+    results = []
+    reference, reference_hop = jumped[0], lifted[0]
+    if isinstance(reference, str) or isinstance(reference_hop, str):
+        return [("at 60 Hz", False, reference if isinstance(reference, str) else reference_hop)]
+    for (name, _, _), moves, hop in list(zip(PHYSICS_RATES, jumped, lifted))[1:]:
+        if isinstance(moves, str) or isinstance(hop, str):
+            results.append((name, False, moves if isinstance(moves, str) else hop))
+            continue
+        # Each measure's difference from 60 Hz's over its tolerance (past 1: too far), the largest kept
+        worst, worst_what = 0.0, ""
+        for move, measures in reference.items():
+            ours = moves.get(move)
+            if ours is None:
+                worst, worst_what = 2.0, f"{move} not measured"
+                break
+            for kind, value in measures.items():
+                apart = abs(ours[kind] - value)
+                share = apart / allowed(kind, value)
+                if share > worst:
+                    unit = " s in the air" if kind == "air" else " along" if kind == "along" else " high"
+                    worst, worst_what = share, f"{move} {ours[kind]:.2f}{unit} (60 Hz {value:.2f})"
+        hop_share = abs(hop - reference_hop) / allowed("hop", reference_hop)
+        passed = worst <= 1.0 and hop_share <= 1.0
+        results.append((name, passed, f"the jumps' most apart: {worst_what}; "
+                                      f"the lift's hop {hop:.2f} high (60 Hz {reference_hop:.2f})"))
+    return results
+
+
 def pictures(exe, reference, work, last=2500, every=100):
     """The beach from the start (--quick) at a fixed time with the sound made frame by frame, every 100th picture of both
     programs compared byte for byte: (pictures the same, [different or missing ones])"""
@@ -215,6 +293,7 @@ def main():
                         help="the program whose pictures ours must match (none: no comparison)")
     parser.add_argument("--sweep", action="store_true", help="every level chunk too (some 20 minutes)")
     parser.add_argument("--work", default=str(HERE / "build/native/check"))
+    parser.add_argument("--physics", action="store_true", help="only the physics' check (past 60 Hz against 60 Hz's)")
     parser.add_argument("--hints-shots", metavar="FOLDER",
                         help="only the menu hints' check, with a window: the pause menu's pictures saved in FOLDER")
     arguments = parser.parse_args()
@@ -230,6 +309,11 @@ def main():
         sys.exit(f"{exe} isn't built")
     work = Path(arguments.work)
     work.mkdir(parents=True, exist_ok=True)
+    if arguments.physics:
+        results = physics(exe, work)
+        for name, ok, what in results:
+            print(f"physics         {'ok' if ok else 'FAILED'} {name} as 60 Hz: {what}")
+        sys.exit(0 if all(ok for _, ok, _ in results) else 1)
     if arguments.hints_shots:
         results = menu_hints(exe, work, arguments.hints_shots)
         for name, ok, what in results:
@@ -269,6 +353,10 @@ def report(exe, reference, work, with_sweep, reference_name=None):
     looked, what = mouse_look(exe, work)
     print(f"mouse look      {'ok' if looked else 'FAILED'}: {what}")
     failed |= not looked
+
+    for name, ok, what in physics(exe, work):
+        print(f"physics         {'ok' if ok else 'FAILED'} {name} as 60 Hz: {what}")
+        failed |= not ok
 
     if reference and reference.exists():
         same, different = pictures(exe, reference, work)

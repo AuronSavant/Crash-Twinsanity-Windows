@@ -653,10 +653,11 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
         g_MouseBoostX = 1.0f;
         g_MouseBoostY = 1.0f;
     }
-    // The level sweep's, the save test's and the hints test's scripted input
+    // The level sweep's, the save test's, the hints test's and the physics test's scripted input
     SweepInput(pad);
     SaveTestInput(pad);
     HintsTestInput(pad);
+    PhysicsTestInput(pad);
 }
 
 void ScaleCameraTurn(f32* yaw, f32* pitch, s32 currentYaw, u32 time)

@@ -303,6 +303,7 @@ void Frame()
     SaveTestFrame();
     HintsTestFrame();
     LookTestFrame();
+    PhysicsTestFrame();
     SettingsShotsFrame();
     MouseFrame();
     ApplyGameSettingsOnce();

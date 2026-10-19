@@ -4,6 +4,12 @@
 #include "game/memory.h"
 #include "platform/time.h"
 
+#ifdef TWIN_NATIVE
+#include "game/controllers.h"
+
+#include <cstdlib>
+#endif
+
 namespace
 {
 // Clock units are the platform's ticks halved until there are at most this many a second
@@ -19,6 +25,48 @@ u32 g_TestTimeChecks;
 u64 Now()
 {
     return g_DebugFixedTime != 0 ? g_TestTicks : Platform::Time::Ticks();
+}
+
+// A test run's next frame's ticks: the frame rate's, or $TWIN_FIXED_TIME's rates in turn ("240,60": a 240th of a second, then a
+// 60th...; the physics test's uneven frames, as a computer's past 60 Hz)
+u64 TestFrameTicks(const GameTimeController* controller)
+{
+    u64 ticks = controller->ticksPerSecond / static_cast<u32>(controller->framesPerSecond);
+#ifdef TWIN_NATIVE
+    constexpr u32 MostRates = 16;
+    static u32 rates[MostRates];
+    static u32 count = 0;
+    static u32 next = 0;
+    static bool read = false;
+    if (!read)
+    {
+        read = true;
+        const char* at = std::getenv("TWIN_FIXED_TIME");
+        while (at != nullptr && *at != '\0' && count < MostRates)
+        {
+            char* end = nullptr;
+            unsigned long rate = std::strtoul(at, &end, 10);
+            if (end == at)
+            {
+                break;
+            }
+
+            if (rate > 1)
+            {
+                rates[count++] = static_cast<u32>(rate);
+            }
+
+            at = *end == ',' ? end + 1 : end;
+        }
+    }
+
+    if (count != 0)
+    {
+        ticks = controller->ticksPerSecond / rates[next];
+        next = (next + 1) % count;
+    }
+#endif
+    return ticks;
 }
 }
 
@@ -166,7 +214,7 @@ extern "C"
     {
         if (g_DebugFixedTime != 0)
         {
-            g_TestTicks += static_cast<u32>(controller->ticksPerSecond) / static_cast<u32>(controller->framesPerSecond);
+            g_TestTicks += TestFrameTicks(controller);
             g_TestTimeChecks = TestTimeChecks;
         }
 
@@ -243,3 +291,11 @@ extern "C"
         return static_cast<u64>(static_cast<s64>(wanted)) < frameTicks - elapsed;
     }
 }
+
+#ifdef TWIN_NATIVE
+bool FramesPast60()
+{
+    constexpr s32 NtscFramesPerSecond = 60;
+    return G_GameClockController != nullptr && G_GameClockController->framesPerSecond > NtscFramesPerSecond;
+}
+#endif
