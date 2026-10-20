@@ -2,6 +2,7 @@
 // native build's settings and log
 #include "graphics/renderthread.h"
 #include "graphics/window.h"
+#include "coop.h"
 #include "native.h"
 #include "ui/nativeui.h"
 #include "platform/io.h"
@@ -94,6 +95,15 @@ void Native::ParseArguments(int& argc, char** argv)
         else if (std::strcmp(argv[i], "--headless") == 0)
         {
             g_Settings.headless = true;
+        }
+        else if (std::strcmp(argv[i], "--coop") == 0)
+        {
+            NativeCoop::SetEnabled(true);
+        }
+        else if (std::strcmp(argv[i], "--coop-keyboard") == 0)
+        {
+            NativeCoop::SetEnabled(true);
+            NativeCoop::SetKeyboardFirst(true);
         }
         else
         {

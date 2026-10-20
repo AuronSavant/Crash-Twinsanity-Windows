@@ -18,6 +18,11 @@
 #include "game/string.h"
 #include "game/widgets.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#include "game/behaviours.h"
+#endif
+
 // The commands that ask the game's controllers: the game controller's requests, the video controller, the music, the player, the
 // custom pickups and projectiles
 
@@ -134,8 +139,15 @@ void EnablePlayerControlCommand::Execute(TimeClock*, BehaviourRunner*, Behaviour
     G_GameController->EnableCharacters(0);
 }
 
-void DisablePlayerControlCommand::Execute(TimeClock*, BehaviourRunner*, BehaviourLevel*)
+void DisablePlayerControlCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLevel*)
 {
+#ifdef TWIN_NATIVE
+    // Co-op: what player 2's twin set off (its death's script, a trigger it walked into) doesn't take player 1's control away
+    if (runner != nullptr && NativeCoop::IsTwin(static_cast<const InstanceContext*>(runner->originator)))
+    {
+        return;
+    }
+#endif
     G_GameController->DisablePlayerControl(0);
 }
 

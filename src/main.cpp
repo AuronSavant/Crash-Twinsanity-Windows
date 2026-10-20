@@ -11,6 +11,7 @@
 #include "retail/libc.h"
 
 #ifdef TWIN_NATIVE
+#include "coop.h"
 #include "ui/nativeui.h"
 #endif
 
@@ -68,7 +69,15 @@ extern "C" int Main(u32 argc, char** argv)
 
     if (G_GamePadController == nullptr)
     {
-        GamePadController* pads = GamePadController::Construct(MemoryAllocate(sizeof(GamePadController)), PadCount);
+        s32 padCount = PadCount;
+#ifdef TWIN_NATIVE
+        // Co-op (native/COOP.md): pad 1 made as well, the second player's
+        if (NativeCoop::Enabled())
+        {
+            padCount = 2;
+        }
+#endif
+        GamePadController* pads = GamePadController::Construct(MemoryAllocate(sizeof(GamePadController)), padCount);
         pads->flags.pads &= ~SecondPadBit;
         G_GamePadController = pads;
     }

@@ -26,6 +26,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 extern "C"
 {
     // A pickup's object node put in a state (pickups.cpp's PickupObjectNode::SetState)
@@ -665,7 +669,12 @@ void CharacterAgent::TouchHits(TimeClock* clock)
         }
     }
 
+#ifdef TWIN_NATIVE
+    // Co-op: player 2's twin draws in and collects the pickups as the player does (coop.cpp)
+    if (IsPlayer() == 0 && !NativeCoop::IsTwin(instance))
+#else
     if (IsPlayer() == 0)
+#endif
     {
         return;
     }

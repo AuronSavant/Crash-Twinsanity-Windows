@@ -2,6 +2,7 @@
 // libpad does (analog mode, two actuators, pressure sensitive mode), reporting what the PS2's report has: the button word
 // (pressed 0), the sticks (0x80 the middle, up 0) and the buttons' pressures (0-255). See native/NATIVE.md for the mapping
 #include "native.h"
+#include "coop.h"
 #include "fixes.h"
 #include "platform/pads.h"
 #include "ui/bindings.h"
@@ -9,8 +10,10 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace
 {
@@ -76,32 +79,55 @@ void StartSdl()
     }
 }
 
-// The first gamepad plugged in, kept until it's unplugged
-void FindGamepad()
+// Co-op's pad port 1 (coop.h): opened, its gamepad
+bool g_SecondOpen = false;
+SDL_Gamepad* g_SecondGamepad = nullptr;
+
+// A gamepad kept until it's unplugged, else the first plugged in that the other player hasn't got
+void FindGamepad(SDL_Gamepad** gamepad, SDL_Gamepad* other, const char* who)
 {
-    if (g_Gamepad != nullptr && SDL_GamepadConnected(g_Gamepad))
+    if (*gamepad != nullptr && SDL_GamepadConnected(*gamepad))
     {
         return;
     }
 
-    if (g_Gamepad != nullptr)
+    if (*gamepad != nullptr)
     {
-        SDL_CloseGamepad(g_Gamepad);
-        g_Gamepad = nullptr;
+        SDL_CloseGamepad(*gamepad);
+        *gamepad = nullptr;
     }
 
+    SDL_JoystickID taken = other != nullptr ? SDL_GetGamepadID(other) : 0;
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    if (ids != nullptr && count > 0)
+    for (int i = 0; ids != nullptr && i < count; i++)
     {
-        g_Gamepad = SDL_OpenGamepad(ids[0]);
-        if (g_Gamepad != nullptr)
+        if (ids[i] == taken)
         {
-            Native::Log("pads: %s", SDL_GetGamepadName(g_Gamepad));
+            continue;
         }
+
+        *gamepad = SDL_OpenGamepad(ids[i]);
+        if (*gamepad != nullptr)
+        {
+            Native::Log("pads: %s%s", who, SDL_GetGamepadName(*gamepad));
+        }
+
+        break;
     }
 
     SDL_free(ids);
+}
+
+// Player 1's gamepad: the first, none with co-op's keyboard for player 1
+void FindGamepad()
+{
+    if (NativeCoop::Enabled() && NativeCoop::KeyboardFirst())
+    {
+        return;
+    }
+
+    FindGamepad(&g_Gamepad, g_SecondGamepad, NativeCoop::Enabled() ? "player 1: " : "");
 }
 }
 
@@ -114,6 +140,12 @@ s32 Platform::Pads::Initialise()
 s32 Platform::Pads::Open(s32 port, s32 slot, void*)
 {
     StartSdl();
+    if (port == 1 && slot == 0 && NativeCoop::Enabled())
+    {
+        g_SecondOpen = true;
+        return 1;
+    }
+
     if (port != 0 || slot != 0)
     {
         return 0;
@@ -130,12 +162,22 @@ s32 Platform::Pads::Close(s32 port, s32 slot)
         g_Open = false;
         g_PressureMode = false;
     }
+    else if (port == 1 && slot == 0)
+    {
+        g_SecondOpen = false;
+    }
 
     return 1;
 }
 
+// Co-op's port 1 is always there (a DualShock 2 at rest while player 2 has no gamepad), so the game never stops for it
 Platform::Pads::State Platform::Pads::GetState(s32 port, s32 slot)
 {
+    if (port == 1 && slot == 0)
+    {
+        return g_SecondOpen ? StateStable : StateDisconnected;
+    }
+
     return port == 0 && slot == 0 && g_Open ? StateStable : StateDisconnected;
 }
 
@@ -189,6 +231,12 @@ s32 Platform::Pads::SetActuatorAlign(s32, s32, const u8*)
 
 s32 Platform::Pads::SetActuatorDirect(s32 port, s32 slot, const u8 values[6])
 {
+    if (port == 1 && slot == 0 && g_SecondOpen)
+    {
+        NativeCoop::RumbleSecondPad(values[0], values[1]);
+        return 1;
+    }
+
     if (port != 0 || slot != 0)
     {
         return 0;
@@ -223,6 +271,41 @@ s32 Platform::Pads::EnterPressureMode(s32 port, s32 slot)
 
 namespace
 {
+// A report (Read's) of what's pressed: the digital buttons' pressures full (the triggers have their own when a gamepad gives them)
+s32 WriteReport(const NativeUi::BoundPad& bound, bool pressureMode, u8* data)
+{
+    u32 buttons = bound.buttons;
+    u8 pressure[PressureReportBytes] = {};
+    pressure[PressureL2] = bound.l2Pressure;
+    pressure[PressureR2] = bound.r2Pressure;
+    for (const PressureOf& of : Pressures)
+    {
+        if ((buttons & of.button) != 0 && pressure[of.byte] == 0)
+        {
+            pressure[of.byte] = Pressed;
+        }
+    }
+
+    std::memset(data, 0, PressureReportBytes);
+    data[0] = 0;
+    data[ReportMode] = pressureMode ? ModePressure : ModeAnalog;
+    data[ReportButtonsHigh] = static_cast<u8>(~buttons >> 8);
+    data[ReportButtonsLow] = static_cast<u8>(~buttons);
+    data[StickRightX] = bound.rightX;
+    data[StickRightY] = bound.rightY;
+    data[StickLeftX] = bound.leftX;
+    data[StickLeftY] = bound.leftY;
+    if (pressureMode)
+    {
+        for (u32 byte = PressureRight; byte <= PressureR2; byte++)
+        {
+            data[byte] = pressure[byte];
+        }
+    }
+
+    return pressureMode ? PressureReportBytes : AnalogReportBytes;
+}
+
 // Keys pressed since the last read: a press shorter than a frame (the native frames can be slow) still counts for one
 bool g_Latched[SDL_SCANCODE_COUNT];
 bool g_Watching = false;
@@ -251,6 +334,11 @@ s32 Platform::Pads::Read(s32 port, s32 slot, u8* data)
     {
         g_Watching = true;
         SDL_AddEventWatch(WatchPadEvents, nullptr);
+    }
+
+    if (port == 1 && slot == 0 && g_SecondOpen)
+    {
+        return NativeCoop::ReadSecondPad(data, g_PressureMode);
     }
 
     if (port != 0 || slot != 0 || !g_Open)
@@ -286,37 +374,144 @@ s32 Platform::Pads::Read(s32 port, s32 slot, u8* data)
     }
 
     NativeUi::ReadBindings(keys, g_Gamepad, &bound);
-    u32 buttons = bound.buttons;
-    u8 pressure[PressureReportBytes] = {};
-    pressure[PressureL2] = bound.l2Pressure;
-    pressure[PressureR2] = bound.r2Pressure;
-    u8 rightX = bound.rightX, rightY = bound.rightY, leftX = bound.leftX, leftY = bound.leftY;
+    return WriteReport(bound, g_PressureMode, data);
+}
 
-    // The digital buttons' pressures: fully pressed (the triggers have their own when a gamepad gives them)
-    for (const PressureOf& of : Pressures)
+namespace
+{
+// Co-op's scripted player 2 ($TWIN_COOP_P2_INPUT, for tests): "frames:leftX:leftY:buttons,..." (the sticks' bytes 0-255, 128 the
+// middle; the buttons the report's bits, hex, Button's), played in a loop
+struct ScriptStep
+{
+    u32 frames;
+    u8 leftX;
+    u8 leftY;
+    u32 buttons;
+};
+
+std::vector<ScriptStep> ReadScript()
+{
+    std::vector<ScriptStep> steps;
+    const char* text = std::getenv("TWIN_COOP_P2_INPUT");
+    while (text != nullptr && *text != '\0')
     {
-        if ((buttons & of.button) != 0 && pressure[of.byte] == 0)
+        unsigned frames = 0, leftX = StickMiddle, leftY = StickMiddle, buttons = 0;
+        if (std::sscanf(text, "%u:%u:%u:%x", &frames, &leftX, &leftY, &buttons) >= 1 && frames > 0)
         {
-            pressure[of.byte] = Pressed;
+            steps.push_back({frames, static_cast<u8>(std::min(leftX, 255u)), static_cast<u8>(std::min(leftY, 255u)), buttons});
+        }
+
+        text = std::strchr(text, ',');
+        text = text != nullptr ? text + 1 : nullptr;
+    }
+
+    return steps;
+}
+
+const std::vector<ScriptStep>& Script()
+{
+    static const std::vector<ScriptStep> steps = ReadScript();
+    return steps;
+}
+
+// The scripted step of this read
+const ScriptStep& ScriptNow()
+{
+    static u32 frame = 0;
+    static size_t step = 0;
+    const std::vector<ScriptStep>& steps = Script();
+    if (frame >= steps[step].frames)
+    {
+        frame = 0;
+        step = (step + 1) % steps.size();
+    }
+
+    frame++;
+    return steps[step];
+}
+
+u8 StickByte(Sint16 value)
+{
+    return static_cast<u8>((static_cast<s32>(value) + 32768) >> 8);
+}
+
+u8 TriggerByte(Sint16 value)
+{
+    return static_cast<u8>(std::clamp(static_cast<s32>(value), 0, 32767) * 255 / 32767);
+}
+
+// Player 2's gamepad as a DualShock 2: the face buttons by place (south cross, east circle, west square, north triangle), the
+// shoulders, triggers, sticks and their clicks, back select
+void ReadSecondGamepad(SDL_Gamepad* gamepad, NativeUi::BoundPad* pad)
+{
+    struct ButtonOf
+    {
+        SDL_GamepadButton from;
+        Button to;
+    };
+    static constexpr ButtonOf Buttons[] = {
+        {SDL_GAMEPAD_BUTTON_SOUTH, ButtonCross},        {SDL_GAMEPAD_BUTTON_EAST, ButtonCircle},
+        {SDL_GAMEPAD_BUTTON_WEST, ButtonSquare},        {SDL_GAMEPAD_BUTTON_NORTH, ButtonTriangle},
+        {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ButtonL1},   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, ButtonR1},
+        {SDL_GAMEPAD_BUTTON_LEFT_STICK, ButtonL3},      {SDL_GAMEPAD_BUTTON_RIGHT_STICK, ButtonR3},
+        {SDL_GAMEPAD_BUTTON_BACK, ButtonSelect},        {SDL_GAMEPAD_BUTTON_START, ButtonStart},
+        {SDL_GAMEPAD_BUTTON_DPAD_UP, ButtonUp},         {SDL_GAMEPAD_BUTTON_DPAD_DOWN, ButtonDown},
+        {SDL_GAMEPAD_BUTTON_DPAD_LEFT, ButtonLeft},     {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ButtonRight},
+    };
+    constexpr u8 TriggerDown = 0x40;
+    for (const ButtonOf& of : Buttons)
+    {
+        if (SDL_GetGamepadButton(gamepad, of.from))
+        {
+            pad->buttons |= of.to;
         }
     }
 
-    std::memset(data, 0, PressureReportBytes);
-    data[0] = 0;
-    data[ReportMode] = g_PressureMode ? ModePressure : ModeAnalog;
-    data[ReportButtonsHigh] = static_cast<u8>(~buttons >> 8);
-    data[ReportButtonsLow] = static_cast<u8>(~buttons);
-    data[StickRightX] = rightX;
-    data[StickRightY] = rightY;
-    data[StickLeftX] = leftX;
-    data[StickLeftY] = leftY;
-    if (g_PressureMode)
+    pad->l2Pressure = TriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
+    pad->r2Pressure = TriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+    pad->buttons |= (pad->l2Pressure >= TriggerDown ? ButtonL2 : 0) | (pad->r2Pressure >= TriggerDown ? ButtonR2 : 0);
+    pad->leftX = StickByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
+    pad->leftY = StickByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+    pad->rightX = StickByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
+    pad->rightY = StickByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    NativeUi::Squared(&pad->leftX, &pad->leftY);
+    NativeUi::Squared(&pad->rightX, &pad->rightY);
+}
+}
+
+bool NativeCoop::SecondPlayerPresent()
+{
+    return g_SecondOpen && (!Script().empty() || g_SecondGamepad != nullptr);
+}
+
+// Read after port 0 (GamePadController::Update's order), whose read pumped SDL's events
+s32 NativeCoop::ReadSecondPad(u8* data, bool pressureMode)
+{
+    NativeUi::BoundPad bound = {};
+    bound.leftX = bound.leftY = bound.rightX = bound.rightY = NativeUi::BoundPad::StickMiddle;
+    if (!Script().empty())
     {
-        for (u32 byte = PressureRight; byte <= PressureR2; byte++)
+        const ScriptStep& step = ScriptNow();
+        bound.leftX = step.leftX;
+        bound.leftY = step.leftY;
+        bound.buttons = step.buttons;
+    }
+    else
+    {
+        FindGamepad(&g_SecondGamepad, NativeCoop::KeyboardFirst() ? nullptr : g_Gamepad, "player 2: ");
+        if (g_SecondGamepad != nullptr)
         {
-            data[byte] = pressure[byte];
+            ReadSecondGamepad(g_SecondGamepad, &bound);
         }
     }
 
-    return g_PressureMode ? PressureReportBytes : AnalogReportBytes;
+    return WriteReport(bound, pressureMode, data);
+}
+
+void NativeCoop::RumbleSecondPad(u8 small, u8 large)
+{
+    if (g_SecondGamepad != nullptr)
+    {
+        SDL_RumbleGamepad(g_SecondGamepad, static_cast<u16>(large * 0x101), small != 0 ? 0xFFFF : 0, 100);
+    }
 }

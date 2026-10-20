@@ -43,6 +43,7 @@
 #include <cstdint>
 
 #ifdef TWIN_NATIVE
+#include "coop.h"
 #include "ui/nativeui.h"
 #endif
 
@@ -232,6 +233,8 @@ u32 GameController::Update(u32 keepFreed)
 #ifdef TWIN_NATIVE
     // The native options' work between frames (fullscreen toggle, mute, 60 Hz)
     NativeUi::Frame();
+    // Co-op: the second character given to player 2's pad, or back to the game (coop.cpp)
+    NativeCoop::Frame();
 #endif
     states.startPressed = GetButtonState(pad, PadStart, true);
     frame++;

@@ -31,6 +31,10 @@
 #include "platform/system.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 // The game's side of the application (GameContext's functions, at the start of .text)
 namespace
 {
@@ -400,6 +404,13 @@ void GameContext::StartGame()
     }
 
     mainPad = static_cast<GamePadController*>(G_GamePadController)->pads[0];
+#ifdef TWIN_NATIVE
+    // Co-op (native/COOP.md): pad 1 is the second player's, the game controller's second pad
+    if (NativeCoop::Enabled())
+    {
+        secondPad = static_cast<GamePadController*>(G_GamePadController)->pads[1];
+    }
+#endif
     InitPickupSpin();
     ResetCustomPickups();
     ResetCustomProjectiles();

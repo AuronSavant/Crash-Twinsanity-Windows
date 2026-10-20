@@ -26,6 +26,7 @@
 #include <cstdint>
 
 #ifdef TWIN_NATIVE
+#include "coop.h"
 #include "fixes.h"
 #endif
 
@@ -926,6 +927,14 @@ void CharacterAgent::Contact(const ContactMessage* message, InstanceContext* sen
         return;
     }
 
+#ifdef TWIN_NATIVE
+    // Co-op: player 1 and player 2's twin don't hurt each other
+    if (NativeCoop::Teammates(instance, sender))
+    {
+        return;
+    }
+#endif
+
     u32 damage = message->damage;
     // The driver takes the hit first and its vehicle's other agent with it (a passenger's vehicle lacks bit 1: its other agent is
     // the driver). Retail bug: the hoverboard's and the wrestle's other agents (the board, the creature) are taken for
@@ -965,6 +974,14 @@ void CharacterAgent::Contact(const ContactMessage* message, InstanceContext* sen
     {
         return;
     }
+
+#ifdef TWIN_NATIVE
+    // Co-op's twin (coop.cpp) isn't killed (a playable character's death restarts the level): put back beside player 1 instead
+    if (damage >= points && NativeCoop::SpareTwin(hit->instance))
+    {
+        return;
+    }
+#endif
 
     KeepContact(hit, message);
     u32 left = damage < points ? points - damage : 0;

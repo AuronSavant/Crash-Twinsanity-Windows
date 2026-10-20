@@ -10,6 +10,10 @@
 #include "game/reference.h"
 #include "game/resources.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 namespace
 {
 // The best score of no body
@@ -563,6 +567,10 @@ u32 BehaviourRunner::StepPacket(TimeClock* clock)
 
 u32 BehaviourRunner::Update(TimeClock* clock)
 {
+#ifdef TWIN_NATIVE
+    // Co-op: a script started by player 2's twin takes the twin for the player while it runs (coop.cpp)
+    NativeCoop::TwinAsPlayer twinAsPlayer(nextStarter != nullptr ? nextOriginator : originator);
+#endif
     if (nextStarter != nullptr)
     {
         TakeStarter();
