@@ -3,6 +3,7 @@
 // (pads.cpp's Read, through ReadBindings)
 #include "ui/bindings.h"
 
+#include "coop.h"
 #include "native.h"
 
 #include "game/gamecontroller.h"
@@ -429,7 +430,11 @@ u8 Shaped(u8 value, f32 deadZone, f32 scale, bool inverted)
 void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
 {
     Read();
-    g_LastGamepad = gamepad;
+    // (Not co-op's player 2 on the keyboard: the last gamepad stays player 1's, for the prompts and the cutscene skip)
+    if (gamepad != nullptr || !(NativeCoop::Enabled() && NativeCoop::KeyboardSecond()))
+    {
+        g_LastGamepad = gamepad;
+    }
     *pad = {};
     pad->leftX = pad->leftY = pad->rightX = pad->rightY = BoundPad::StickMiddle;
     g_MouseBoostX = 1.0f;
@@ -444,7 +449,8 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
     bool playing = InPlay();
     // The mouse's buttons and wheel as keys only in play (in the menus they're the mouse's own), with the window in front (or
     // holding the mouse)
-    bool mouseHere = playing && (SDL_GetMouseFocus() != nullptr || MouseLookActive());
+    // (No keys: a read of the gamepad alone, co-op's player 1 while player 2 has the keyboard and so the mouse's buttons too)
+    bool mouseHere = playing && keys != nullptr && (SDL_GetMouseFocus() != nullptr || MouseLookActive());
     SDL_MouseButtonFlags mouse = mouseHere ? SDL_GetMouseState(nullptr, nullptr) : 0;
     bool wheelUp = false;
     bool wheelDown = false;
@@ -600,7 +606,9 @@ void ReadBindings(const bool* keys, SDL_Gamepad* gamepad, BoundPad* pad)
     // deflection: the mouse's push past it is the camera's turn's boost
     f32 mouseX = 0.0f;
     f32 mouseY = 0.0f;
-    if (playing && MouseLookStick(&mouseX, &mouseY))
+    // (The mouse's look turns the one camera, player 1's: not co-op's player 2's read of the keyboard)
+    bool keyboardPlayerTwo = keys != nullptr && gamepad == nullptr && NativeCoop::Enabled() && NativeCoop::KeyboardSecond();
+    if (playing && !keyboardPlayerTwo && MouseLookStick(&mouseX, &mouseY))
     {
         keyboardUsed = true;
         mouseX = IsOn(OptionInvertCameraX) ? -mouseX : mouseX;

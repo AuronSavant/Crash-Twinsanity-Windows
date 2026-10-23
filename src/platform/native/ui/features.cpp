@@ -2,6 +2,7 @@
 #include "ui/nativeui.h"
 #include "ui/bindings.h"
 
+#include "coop.h"
 #include "native.h"
 #include "graphics/presenter.h"
 #include "audio/volumes.h"
@@ -170,8 +171,10 @@ std::vector<s32> HeldInputs()
     }
 
     std::vector<s32> held;
+    // Co-op with player 2 on the keyboard (--coop-keyboard): only player 1's gamepad skips (player 2 moving didn't end the scenes)
+    bool playerOneAlone = NativeCoop::Enabled() && NativeCoop::KeyboardSecond();
     int count = 0;
-    const bool* keys = SDL_GetKeyboardState(&count);
+    const bool* keys = playerOneAlone ? nullptr : SDL_GetKeyboardState(&count);
     for (int key = 0; keys != nullptr && key < count; key++)
     {
         if (keys[key])
@@ -180,7 +183,7 @@ std::vector<s32> HeldInputs()
         }
     }
 
-    if (SDL_GetMouseFocus() != nullptr || MouseLookActive())
+    if (!playerOneAlone && (SDL_GetMouseFocus() != nullptr || MouseLookActive()))
     {
         SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
         for (int button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++)

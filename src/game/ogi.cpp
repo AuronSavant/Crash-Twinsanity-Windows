@@ -13,6 +13,10 @@
 #include "platform/math.h"
 #include "retail/libc.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 namespace
 {
 Platform::Graphics::ModelLights LightsAt(const ChunkLights* lights)
@@ -372,6 +376,13 @@ void ModelNode::Draw(const Matrix4x4* matrix, const Matrix4x4* chunkMatrix, Chun
     if (drawnOgi != nullptr)
     {
         GatherStrongestLights(lights, chunkMatrix, lighting);
+#ifdef TWIN_NATIVE
+        // Co-op: player 2's twin lit in its own colour, to be told from player 1's (coop.cpp)
+        if (lights != nullptr && NativeCoop::IsTwin(owner))
+        {
+            NativeCoop::TintTwinLights(lights);
+        }
+#endif
         if (drawnAnimator == nullptr)
         {
             DrawOgiRigidModels(drawnOgi, matrix, lights, mode);

@@ -10,12 +10,14 @@
 
 #include "game/agentparts.h"
 #include "game/agents.h"
+#include "game/behaviours.h"
 #include "game/characters.h"
 #include "game/chunkdata.h"
 #include "game/chunkloading.h"
 #include "game/gamecontroller.h"
 #include "game/instancefactory.h"
 #include "game/instances.h"
+#include "game/lights.h"
 #include "game/objectnode.h"
 #include "game/objects.h"
 #include "game/place.h"
@@ -26,7 +28,9 @@
 #include "game/properties.h"
 #include "game/reference.h"
 #include "game/resources.h"
+#include "game/vehicles.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 
@@ -34,7 +38,7 @@ namespace
 {
 // -1: not asked for on the command line ($TWIN_COOP decides)
 int g_Enabled = -1;
-bool g_KeyboardFirst = false;
+bool g_KeyboardSecond = false;
 
 // The second character the pad was given to (none: the game's own)
 InstanceContext* g_Controlled = nullptr;
@@ -74,28 +78,13 @@ ControlsNode* ControlsOf(InstanceContext* instance)
     return static_cast<ControlsNode*>(GetGameNode(&instance->nodes, NodeControls));
 }
 
-// Player 2's character: the progress's second (its pairings that play two: tied, the Rollerbrawl, ...), else another playable
-// character the level made beside the one played (Cortex following Crash: the progress names no second then), the first of them
-InstanceContext* SecondCharacter(const GameProgress& progress, InstanceContext* first, u32* which)
+// Player 2's character from the level: the progress's second, the one the game itself pairs with player 1's (tied, the
+// Rollerbrawl, the Humiliskate, ...). Any other playable character the level made is the story's (the boss area's Cortex is the
+// boss, the one the aliens take is about to go) and is left to it: then player 2 plays a twin of player 1's character
+InstanceContext* SecondCharacter(const GameProgress& progress, InstanceContext*, u32* which)
 {
     *which = progress.play.second;
-    if (progress.play.second != GameProgress::NoCharacter)
-    {
-        return progress.Instance(progress.play.second);
-    }
-
-    // (CharacterNone's slot is the level's other characters that aren't playable)
-    for (u32 character = 0; character < GameProgress::Characters; character++)
-    {
-        InstanceContext* instance = character != CharacterNone ? progress.Instance(character) : nullptr;
-        if (instance != nullptr && instance != first && InstanceLive(instance) && ControlsOf(instance) != nullptr)
-        {
-            *which = character;
-            return instance;
-        }
-    }
-
-    return nullptr;
+    return progress.play.second != GameProgress::NoCharacter ? progress.Instance(progress.play.second) : nullptr;
 }
 
 // The pad given back: the second character stands still until the game moves it again (as DisableCharacter leaves it)
@@ -183,10 +172,13 @@ ChunkData* g_SpawnTriedChunk = nullptr;
 // The partner made (none when it's gone with its chunk), and whether it's a twin of player 1's character
 Reference* g_Partner = nullptr;
 bool g_PartnerIsTwin = false;
-// The frame (g_Frames) the twin last died, and how long after it player 1's control is watched (10 s)
-u32 g_TwinDiedFrame = 0;
-bool g_TwinDied = false;
-constexpr u32 WatchAfterDeathFrames = 600;
+// Player 2 asked to be brought back beside player 1 (their Select, or F6), and a restart seen (the twin put back after it)
+bool g_RegroupAsked = false;
+bool g_RestartSeen = false;
+// Player 2's pad added into player 1's (the Rollerbrawl)
+bool g_SharesPad = false;
+// While a script runs with the twin as the player (TwinAsPlayer), the twin
+InstanceContext* g_ScriptPlayer = nullptr;
 
 InstanceContext* Partner()
 {
@@ -195,36 +187,10 @@ InstanceContext* Partner()
 }
 u32 g_ControlledFrames = 0;
 constexpr u32 SpawnAfterFrames = 90;
+// The flags a twin takes from player 1's instance: shown, solid, shadowed and reached by triggers
+constexpr u32 PlayerFlags = ReferencedObjectFlags::Visible | ReferencedObjectFlags::CollisionActive |
+                            ReferencedObjectFlags::ShadowActive | ReferencedObjectFlags::ReceivesTriggerSignals;
 constexpr f32 SpawnBeside = 1.5f;
-
-u16 PartnerObject(u32 partner)
-{
-    GameResources* resources = g_InstanceFactory != nullptr ? g_InstanceFactory->resources : nullptr;
-    ResourceTable* objects = resources != nullptr ? resources->objects : nullptr;
-    if (objects == nullptr || objects->items == nullptr)
-    {
-        return NoObjectId;
-    }
-
-    for (u32 id = 0; id < objects->bits.capacity; id++)
-    {
-        auto* object = static_cast<GameObject*>(objects->items[id]);
-        if (object == nullptr || object->header.type != GameObject::TypeCharacter || object->properties == nullptr ||
-            object->properties->intCount == 0)
-        {
-            continue;
-        }
-
-        if (object->properties->IntAt(CharacterKindProperty) == static_cast<s32>(partner))
-        {
-            Native::Log("coop: character %u's object is 0x%X (%s)", partner, id,
-                        object->name.string != nullptr ? object->name.string : "?");
-            return static_cast<u16>(id);
-        }
-    }
-
-    return NoObjectId;
-}
 
 void SpawnPartner(GameController* controller, InstanceContext* first)
 {
@@ -237,33 +203,30 @@ void SpawnPartner(GameController* controller, InstanceContext* first)
     ControlsNode* firstControls = ControlsOf(first);
     CharacterAgent* firstAgent = CharacterAgentOf(first);
     if (firstControls == nullptr || firstAgent == nullptr || firstControls->pad != controller->pad ||
-        firstControls->bits.motionDriven != 0 || firstAgent->vehicle != nullptr)
+        firstControls->bits.motionDriven != 0 || firstAgent->vehicle != nullptr ||
+        controller->State() != GameController::StatePlaying)
     {
         return;
     }
 
     g_SpawnTriedChunk = first->chunk;
     GameProgress& progress = controller->progress;
+    // Always a twin of the one played (a second Crash): a Cortex made here would be the story's Cortex (the boss's, the one the
+    // aliens take)
     u32 played = progress.play.character;
-    u32 partner = played == CharacterCrash ? CharacterCortex : CharacterCrash;
-    if (progress.Instance(partner) != nullptr)
-    {
-        return;
-    }
+    u32 partner = played;
+    u16 object = firstAgent->objectId;
+    constexpr bool twin = true;
+    Native::Log("coop: player 2 gets a twin of character %u", played);
 
-    u16 object = PartnerObject(partner);
-    // Not loaded here (Cortex on the beach): a twin of the one played, whose object is
-    bool twin = object == NoObjectId;
-    if (twin)
+    // The chunk player 1 is in now, loaded (the agent's chunk index is the chunk it started the level in: once player 1 had
+    // gone on into another and that one was let go, the twin's camera rig was made in a chunk with no scenery, a crash)
+    ChunkEntry* chunk = ChunkOfInstance(controller->chunkManager, first);
+    if (chunk == nullptr || chunk->data == nullptr || chunk->data->chunk != first->chunk)
     {
-        object = firstAgent->objectId;
-        partner = played;
-        Native::Log("coop: character %u isn't loaded here, player 2 gets a twin of character %u", partner, played);
-    }
-
-    ChunkEntry* chunk = ChunkOfIndex(controller->chunkManager, firstAgent->chunkIndex);
-    if (chunk == nullptr)
-    {
+        Native::Log("coop: player 1's chunk isn't ready, the twin's made later");
+        g_SpawnTriedChunk = nullptr;
+        g_ControlledFrames = 0;
         return;
     }
 
@@ -303,8 +266,6 @@ void SpawnPartner(GameController* controller, InstanceContext* first)
 
         // Shown, solid, shadowed and reached by triggers as player 1 is (its object's state has it hidden: the layouts' instances
         // of the characters give theirs)
-        constexpr u32 PlayerFlags = ReferencedObjectFlags::Visible | ReferencedObjectFlags::CollisionActive |
-                                    ReferencedObjectFlags::ShadowActive | ReferencedObjectFlags::ReceivesTriggerSignals;
         made->flags.value = (made->flags.value & ~PlayerFlags) | (first->flags.value & PlayerFlags);
         // Its nodes updated whatever the distance (its object gives none: the layouts' instances of the characters do, and the
         // spawn commands give theirs the same)
@@ -333,43 +294,71 @@ void SpawnPartner(GameController* controller, InstanceContext* first)
                 made != nullptr ? "ok" : "failed");
 }
 
-// After the twin died (its death's scripts were written for the one player: they take control away and wait for the restart that
-// no longer comes), player 1's control given back while the game is in plain play
-void KeepPlayerOneInControl(GameController* controller, InstanceContext* first)
+// Player 2's character brought back beside player 1 (Select on player 2's pad or F6, and after every restart): put in player 1's
+// chunk, woken, shown and solid as player 1, alive with player 1's hit points and nothing locked. With none (a twin gone with a
+// restart or a chunk), one is made beside player 1 at once
+void Regroup(GameController* controller, InstanceContext* first, const char* why)
 {
-    if (!g_TwinDied || g_Frames - g_TwinDiedFrame > WatchAfterDeathFrames)
-    {
-        g_TwinDied = false;
-        return;
-    }
-
-    if (first == nullptr || !InstanceLive(first) || controller->State() != GameController::StatePlaying)
+    if (first == nullptr || !InstanceLive(first))
     {
         return;
     }
 
-    ControlsNode* controls = ControlsOf(first);
-    CharacterAgent* agent = CharacterAgentOf(first);
-    if (controls == nullptr || agent == nullptr || agent->vehicle != nullptr || agent->state.dead != 0)
+    InstanceContext* twin = Partner();
+    // The character player 2 plays (the level's Cortex), else its twin
+    InstanceContext* second = g_Controlled != nullptr && InstanceLive(g_Controlled) && g_Controlled != twin ? g_Controlled : twin;
+    if (second == nullptr || second == first)
+    {
+        if (NativeCoop::SecondPlayerPresent() && SpawnPartners())
+        {
+            g_SpawnTriedChunk = nullptr;
+            // After the usual moment of player 1's control: made at once after a restart, the area wasn't ready (its camera
+            // rig's made in the chunk's scenery: a crash at the first boss's restart)
+            g_ControlledFrames = 0;
+            Native::Log("coop: regroup (%s): no character for player 2, one is made", why);
+        }
+
+        return;
+    }
+
+    CharacterAgent* agent = CharacterAgentOf(second);
+    CharacterAgent* firstAgent = CharacterAgentOf(first);
+    if (agent == nullptr || firstAgent == nullptr || agent->vehicle != nullptr)
     {
         return;
     }
 
-    bool taken = controls->pad != controller->pad || controls->bits.motionDriven != 0 ||
-                 agent->buttons.locked.value == CharacterButtons::LockAll;
-    if (!taken)
+    if (second->chunk != first->chunk && first->chunk != nullptr)
     {
-        return;
+        MoveToChunk(first->chunk, second);
     }
 
-    controls->pad = controller->pad;
-    controls->bits.motionDriven = 0;
-    if (agent->buttons.locked.value == CharacterButtons::LockAll)
+    if (second->flags.asleep != 0)
     {
+        CallVirtual<void>(second, second->vtable, ReferencedObject::WakeSlot);
+    }
+
+    if (second == twin)
+    {
+        second->flags.value = (second->flags.value & ~PlayerFlags) | (first->flags.value & PlayerFlags);
+        static_cast<CharacterPart*>(agent->part)->flags.hitPoints = static_cast<CharacterPart*>(firstAgent->part)->flags.hitPoints;
+        agent->state.dead = 0;
         agent->buttons.locked.value = 0;
+        if (ControlsNode* controls = ControlsOf(second))
+        {
+            controls->bits.motionDriven = 0;
+        }
     }
 
-    Native::Log("coop: player 1's control given back after player 2's twin died");
+    agent->velocity = {0.0f, 0.0f, 0.0f, 1.0f};
+    Vector4 position = PositionOf(first);
+    position.x += SpawnBeside;
+    position.y += 0.5f;
+    ObjectPlace* place = second->place;
+    place->SyncPosition();
+    place->MoveTo(&position);
+    QueueObject(second);
+    Native::Log("coop: regroup (%s): player 2 put beside player 1 at (%.1f, %.1f, %.1f)", why, position.x, position.y, position.z);
 }
 
 void LogFrame(GameController* controller, InstanceContext* first, InstanceContext* second, const char* why)
@@ -444,14 +433,19 @@ void NativeCoop::SetEnabled(bool on)
     g_Enabled = on ? 1 : 0;
 }
 
-bool NativeCoop::KeyboardFirst()
+bool NativeCoop::KeyboardSecond()
 {
-    return g_KeyboardFirst || std::getenv("TWIN_COOP_KEYBOARD") != nullptr;
+    return g_KeyboardSecond || std::getenv("TWIN_COOP_KEYBOARD") != nullptr;
 }
 
-void NativeCoop::SetKeyboardFirst(bool on)
+void NativeCoop::SetKeyboardSecond(bool on)
 {
-    g_KeyboardFirst = on;
+    g_KeyboardSecond = on;
+}
+
+bool NativeCoop::SharesPad()
+{
+    return g_SharesPad;
 }
 
 bool NativeCoop::IsTwin(const InstanceContext* instance)
@@ -459,12 +453,96 @@ bool NativeCoop::IsTwin(const InstanceContext* instance)
     return instance != nullptr && instance == Partner() && g_PartnerIsTwin;
 }
 
-NativeCoop::TwinAsPlayer::TwinAsPlayer(const void* originator)
+void NativeCoop::TintTwinLights(ChunkLights* lights)
+{
+    // Red and green down, blue up: the twin's a blue-tinged Crash in any light
+    constexpr f32 Red = 0.55f;
+    constexpr f32 Green = 0.75f;
+    constexpr f32 Blue = 1.6f;
+    auto tint = [](Vector4* colour) {
+        colour->x *= Red;
+        colour->y *= Green;
+        colour->z *= Blue;
+    };
+
+    for (Vector4& colour : lights->colours)
+    {
+        tint(&colour);
+    }
+
+    tint(&lights->ambient);
+}
+
+namespace
+{
+// Whether a creature (an enemy) is nearer the twin than player 1: in the twin's chunk without player 1, else by distance
+bool NearerTheTwin(InstanceContext* creature, InstanceContext* twin)
+{
+    GameController* controller = G_GameController;
+    if (creature == nullptr || creature == twin || !InstanceLive(creature) ||
+        GetGameNode(&creature->nodes, NodeCreature) == nullptr || controller == nullptr || creature->chunk != twin->chunk)
+    {
+        return false;
+    }
+
+    const GameProgress& progress = controller->progress;
+    InstanceContext* first = progress.Instance(progress.play.character);
+    if (first == nullptr || !InstanceLive(first) || first->chunk != creature->chunk)
+    {
+        return true;
+    }
+
+    Vector4 at = PositionOf(creature);
+    Vector4 a = PositionOf(first);
+    Vector4 b = PositionOf(twin);
+    f32 toFirst = (at.x - a.x) * (at.x - a.x) + (at.y - a.y) * (at.y - a.y) + (at.z - a.z) * (at.z - a.z);
+    f32 toTwin = (at.x - b.x) * (at.x - b.x) + (at.y - b.y) * (at.y - b.y) + (at.z - b.z) * (at.z - b.z);
+    return toTwin < toFirst;
+}
+}
+
+InstanceContext* NativeCoop::ScriptPlayer()
+{
+    return g_ScriptPlayer;
+}
+
+void NativeCoop::RequestRegroup()
+{
+    if (Enabled())
+    {
+        g_RegroupAsked = true;
+    }
+}
+
+NativeCoop::TwinAsPlayer::TwinAsPlayer(const void* originator, InstanceContext* owner)
 {
     InstanceContext* twin = Partner();
-    if (originator == nullptr || twin == nullptr || originator != twin || !g_PartnerIsTwin)
+    if (twin == nullptr || !g_PartnerIsTwin || twin->flags.asleep != 0)
     {
         return;
+    }
+
+    // A boss fight (the boss's health bar) is the game's own: its scripts see player 1 alone (the Mecha-Bandicoot's escape
+    // platform never came while the boss took the twin for the player)
+    GameController* controller = G_GameController;
+    if (controller == nullptr || controller->progress.play.mode == PlayHealth)
+    {
+        return;
+    }
+
+    // What the twin set off, and the enemies nearer the twin (they chase and attack the player their scripts see)
+    if (originator != twin)
+    {
+        if (!NearerTheTwin(owner, twin))
+        {
+            return;
+        }
+
+        static u32 enemyRuns = 0;
+        if (Logging() && enemyRuns++ % 600 == 0)
+        {
+            Native::Log("coop: an enemy's script takes player 2 for the player (%u so far)", enemyRuns);
+        }
     }
 
     CharacterAgent* agent = CharacterAgentOf(twin);
@@ -484,6 +562,8 @@ NativeCoop::TwinAsPlayer::TwinAsPlayer(const void* originator)
     g_PlayerCharacter2 = static_cast<PlayerCharacter*>(agent);
     g_PlayerPart = static_cast<CharacterPart*>(agent->part);
     g_PlayerPart2 = static_cast<CharacterPart*>(agent->part);
+    saved_[5] = g_ScriptPlayer;
+    g_ScriptPlayer = twin;
 }
 
 NativeCoop::TwinAsPlayer::~TwinAsPlayer()
@@ -498,6 +578,94 @@ NativeCoop::TwinAsPlayer::~TwinAsPlayer()
     g_PlayerCharacter2 = static_cast<PlayerCharacter*>(saved_[2]);
     g_PlayerPart = static_cast<CharacterPart*>(saved_[3]);
     g_PlayerPart2 = static_cast<CharacterPart*>(saved_[4]);
+    g_ScriptPlayer = static_cast<InstanceContext*>(saved_[5]);
+}
+
+namespace
+{
+// The throw trace: on until then (from Cortex's thrown events)
+using TraceClock = std::chrono::steady_clock;
+TraceClock::time_point g_TraceUntil{};
+constexpr auto TraceTime = std::chrono::seconds(15);
+
+bool Tracing()
+{
+    return TraceClock::now() < g_TraceUntil;
+}
+
+InstanceContext* CortexInstance()
+{
+    GameController* controller = G_GameController;
+    return controller != nullptr ? controller->progress.Instance(CharacterCortex) : nullptr;
+}
+
+// Who an instance is, for the trace: the players' characters by name, anything else by its object's name
+const char* WhoIs(const InstanceContext* instance)
+{
+    if (instance == nullptr)
+    {
+        return "-";
+    }
+
+    if (instance == CortexInstance())
+    {
+        return "Cortex";
+    }
+
+    if (instance == Partner())
+    {
+        return "player 2's twin";
+    }
+
+    GameController* controller = G_GameController;
+    if (controller != nullptr && instance == controller->progress.Instance(controller->progress.play.character))
+    {
+        return "player 1";
+    }
+
+    auto* node = static_cast<AgentNode*>(GetGameNode(&const_cast<InstanceContext*>(instance)->nodes, NodeCharacter));
+    AgentNode* agentNode = node != nullptr ? node : AgentNodeOf(const_cast<InstanceContext*>(instance));
+    GameObject* object = agentNode != nullptr && agentNode->agent != nullptr ? agentNode->agent->object : nullptr;
+    return object != nullptr && object->name.string != nullptr ? object->name.string : "?";
+}
+}
+
+void NativeCoop::TraceEvent(Agent* agent, u32 event, const void* originator)
+{
+    if (!Enabled() || agent == nullptr)
+    {
+        return;
+    }
+
+    InstanceContext* cortex = CortexInstance();
+    bool isCortex = cortex != nullptr && agent->instance == cortex;
+    if (isCortex && (event == EventThrownFromSpin || event == EventThrownFromJump))
+    {
+        g_TraceUntil = TraceClock::now() + TraceTime;
+        Native::Log("trace: Cortex thrown (event %u): his scripts and what he sets off logged for 15 s", event);
+    }
+
+    if (Tracing() && (isCortex || (cortex != nullptr && originator == cortex)))
+    {
+        Native::Log("trace: event %u on %s (from %s)", event, WhoIs(agent->instance),
+                    WhoIs(static_cast<const InstanceContext*>(originator)));
+    }
+}
+
+void NativeCoop::TraceCommand(BehaviourRunner* runner, u32 commandId)
+{
+    if (!Tracing() || runner == nullptr)
+    {
+        return;
+    }
+
+    InstanceContext* cortex = CortexInstance();
+    InstanceContext* owner = runner->agentNode != nullptr ? runner->agentNode->owner : nullptr;
+    if (cortex != nullptr && (owner == cortex || runner->originator == cortex))
+    {
+        Native::Log("trace: %s runs command %u (from %s)", WhoIs(owner), commandId,
+                    WhoIs(static_cast<const InstanceContext*>(runner->originator)));
+    }
 }
 
 bool NativeCoop::Teammates(InstanceContext* one, InstanceContext* other)
@@ -529,36 +697,11 @@ bool NativeCoop::SpareTwin(InstanceContext* instance)
         return false;
     }
 
-    // The latest checkpoint set (the respawn one, else the saved one, else the start's): the twin comes back where player 1 would
-    // (a checkpoint in a chunk that isn't loaded lets the twin go; it's made again beside player 1)
-    const Checkpoint* checkpoint = nullptr;
-    for (u32 slot : {GameProgress::CheckpointRespawn, GameProgress::CheckpointSaved, GameProgress::CheckpointStart})
-    {
-        Checkpoint* candidate = progress.checkpoints[slot];
-        if (candidate != nullptr && candidate->bits.set != 0)
-        {
-            checkpoint = candidate;
-            break;
-        }
-    }
-
+    // Back beside player 1, alive: the twin never dies (moving it to a checkpoint's placement crashed the game: a placement in a
+    // chunk that isn't loaded lets the instance go). Player 2 can also come back any time with Select (Regroup)
     if (CharacterAgent* agent = CharacterAgentOf(instance))
     {
         agent->velocity = {0.0f, 0.0f, 0.0f, 1.0f};
-    }
-
-    g_TwinDied = true;
-    g_TwinDiedFrame = g_Frames;
-    if (checkpoint != nullptr)
-    {
-        InstancePlacement placement;
-        CopyInstancePlacement(&placement, &checkpoint->character);
-        placement.position.x += SpawnBeside;
-        placement.Apply(instance);
-        QueueObject(instance);
-        Native::Log("coop: player 2's twin died: back at the checkpoint (%.1f, %.1f, %.1f)", placement.position.x,
-                    placement.position.y, placement.position.z);
-        return true;
     }
 
     Vector4 position = PositionOf(first);
@@ -571,7 +714,7 @@ bool NativeCoop::SpareTwin(InstanceContext* instance)
         QueueObject(instance);
     }
 
-    Native::Log("coop: player 2's twin died, no checkpoint: back beside player 1");
+    Native::Log("coop: player 2's twin would have died: back beside player 1");
     return true;
 }
 
@@ -591,15 +734,53 @@ void NativeCoop::Frame()
     g_Frames++;
     GameProgress& progress = controller->progress;
     InstanceContext* first = progress.Instance(progress.play.character);
-    KeepPlayerOneInControl(controller, first);
+    // Both steer the Rollerbrawl (Crash and Cortex rolling as they fight): player 1 drives it, player 2's pad added in (pads.cpp)
+    CharacterAgent* firstAgent = first != nullptr && InstanceLive(first) ? CharacterAgentOf(first) : nullptr;
+    bool sharing = firstAgent != nullptr && firstAgent->vehicle != nullptr &&
+                   firstAgent->vehicle->Kind() == Vehicle::KindRollerbrawl && SecondPlayerPresent();
+    if (sharing != g_SharesPad)
+    {
+        Native::Log(sharing ? "coop: both players steer the Rollerbrawl" : "coop: the Rollerbrawl's over");
+    }
+
+    g_SharesPad = sharing;
+    // A restart (player 1's death, a checkpoint restarted): the twin put back beside player 1 once play is on again. Only a
+    // restart: the end of a cutscene starts play again too (EndCutscene's StateStartingPlay), and moving the twin then breaks
+    // the scripts that follow it
+    u32 state = controller->State();
+    if (state == GameController::StateRestarting)
+    {
+        g_RestartSeen = true;
+    }
+    else if (state == GameController::StatePlaying && (g_RestartSeen || g_RegroupAsked))
+    {
+        Regroup(controller, first, g_RestartSeen ? "after a restart" : "player 2 asked");
+        g_RestartSeen = false;
+        g_RegroupAsked = false;
+    }
     u32 which = GameProgress::NoCharacter;
     InstanceContext* second = SecondCharacter(progress, first, &which);
-    // The partner made for player 2 (a twin isn't in the progress's characters)
-    if (second == nullptr && Partner() != nullptr && Partner() != first)
+    InstanceContext* twin = Partner();
+    if (twin == first)
     {
-        second = Partner();
-        which = progress.play.character;
+        twin = nullptr;
     }
+
+    // The twin waits where it is while player 2 plays the paired character (it's never put to sleep: an instance put to sleep
+    // while the area loaded hung the game entering the first boss's area), and is player 2's again, beside player 1, after
+    bool backToTwin = second == nullptr && twin != nullptr && g_Controlled != nullptr && g_Controlled != twin;
+    if (second == nullptr && twin != nullptr)
+    {
+        second = twin;
+        which = progress.play.character;
+        if (backToTwin && state == GameController::StatePlaying)
+        {
+            // The paired character let go first: the regroup moves the twin, not it
+            Release(g_Controlled, controller->secondPad, "back to player 2's twin");
+            Regroup(controller, first, "back to player 2's twin");
+        }
+    }
+
     // The second character changed (a switch, a new level): the one before let go
     if (g_Controlled != nullptr && g_Controlled != second)
     {
@@ -635,5 +816,20 @@ void NativeCoop::Frame()
         controls->pad = controller->secondPad;
         g_Controlled = second;
         Native::Log("coop: player 2 plays character %u", which);
+    }
+
+    // Player 2's Cortex shoots with square (the spin's button): the gun's input kept unlocked (his companion scripts lock it) and
+    // its ammo topped up
+    CharacterAgent* agent = CharacterAgentOf(second);
+    if (second != Partner() && agent != nullptr && agent->gun != nullptr &&
+        agent->properties->GetInt(CharacterKindProperty) == CharacterCortex)
+    {
+        constexpr u32 LowAmmo = 5;
+        constexpr u32 ToppedUpAmmo = 15;
+        agent->buttons.locked.square = 0;
+        if (agent->gun->bits.ammo < LowAmmo)
+        {
+            agent->gun->bits.ammo = ToppedUpAmmo;
+        }
     }
 }

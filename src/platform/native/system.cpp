@@ -103,7 +103,7 @@ void Native::ParseArguments(int& argc, char** argv)
         else if (std::strcmp(argv[i], "--coop-keyboard") == 0)
         {
             NativeCoop::SetEnabled(true);
-            NativeCoop::SetKeyboardFirst(true);
+            NativeCoop::SetKeyboardSecond(true);
         }
         else
         {

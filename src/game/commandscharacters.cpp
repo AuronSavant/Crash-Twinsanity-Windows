@@ -33,6 +33,11 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#include "game/behaviours.h"
+#endif
+
 // The commands that work on the playable characters and the agents around them (velocities thrown, the agents' and the player's
 // settings, counters, hits on the instances in an instance's hulls, respawn points, links, vehicles, crates), the damage commands'
 // parsers of a token, two command classes nothing makes, a character's surface sounds, and this translation unit's start-up
@@ -1029,6 +1034,13 @@ void WarpToChunkLinkTowardsPlayerCommand::Execute(TimeClock*, BehaviourRunner* r
 // when it's set
 void SetPlayerRespawnPositionCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLevel*)
 {
+#ifdef TWIN_NATIVE
+    // Co-op: only player 1 sets checkpoints (one player 2's twin reached elsewhere put player 1's restart out of bounds)
+    if (NativeCoop::IsTwin(static_cast<const InstanceContext*>(runner->originator)) || NativeCoop::ScriptPlayer() != nullptr)
+    {
+        return;
+    }
+#endif
     GameController* controller = G_GameController;
     GameProgress* progress = &controller->progress;
     ChunkManager* chunks = controller->chunkManager;

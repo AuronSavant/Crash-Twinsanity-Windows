@@ -143,7 +143,9 @@ void DisablePlayerControlCommand::Execute(TimeClock*, BehaviourRunner* runner, B
 {
 #ifdef TWIN_NATIVE
     // Co-op: what player 2's twin set off (its death's script, a trigger it walked into) doesn't take player 1's control away
-    if (runner != nullptr && NativeCoop::IsTwin(static_cast<const InstanceContext*>(runner->originator)))
+    // (Not in a boss fight, the boss's health bar: its sequences are the game's own)
+    if (runner != nullptr && NativeCoop::IsTwin(static_cast<const InstanceContext*>(runner->originator)) &&
+        G_GameController->progress.play.mode != PlayHealth)
     {
         return;
     }

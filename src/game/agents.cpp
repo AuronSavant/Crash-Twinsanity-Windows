@@ -18,6 +18,10 @@
 #include "game/rigidbody.h"
 #include "game/shadows.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 extern "C"
 {
     // An instance's model's joint's position (in the world when asked). Whether it has the joint
@@ -279,6 +283,10 @@ void SetAgentModel(Agent* agent, GameResources* resources)
 
 u32 RunAgentEvent(Agent* agent, u32 event, uiptr originator, u32 force, u32 runner)
 {
+#ifdef TWIN_NATIVE
+    // Co-op's throw trace (coop.cpp)
+    NativeCoop::TraceEvent(agent, event, reinterpret_cast<const void*>(originator));
+#endif
     GameObject* object = agent->object;
     if (object == nullptr || agent->eventFlags.eventsOff != 0 || event >= object->header.behaviourSlots)
     {

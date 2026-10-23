@@ -44,6 +44,7 @@
 
 #ifdef TWIN_NATIVE
 #include "coop.h"
+#include "savehistory.h"
 #include "ui/nativeui.h"
 #endif
 
@@ -235,6 +236,8 @@ u32 GameController::Update(u32 keepFreed)
     NativeUi::Frame();
     // Co-op: the second character given to player 2's pad, or back to the game (coop.cpp)
     NativeCoop::Frame();
+    // The saves' history: a save just written copied (savehistory.cpp)
+    NativeSaveHistory::Frame();
 #endif
     states.startPressed = GetButtonState(pad, PadStart, true);
     frame++;

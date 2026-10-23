@@ -79,9 +79,31 @@ void StartSdl()
     }
 }
 
-// Co-op's pad port 1 (coop.h): opened, its gamepad
+// Co-op's pad port 1 (coop.h): opened, its gamepad, and what it read last
 bool g_SecondOpen = false;
 SDL_Gamepad* g_SecondGamepad = nullptr;
+NativeUi::BoundPad g_LastSecondPlayer = {0, 0, 0, NativeUi::BoundPad::StickMiddle, NativeUi::BoundPad::StickMiddle,
+                                         NativeUi::BoundPad::StickMiddle, NativeUi::BoundPad::StickMiddle};
+
+// A stick's byte with another's push added (both from the middle), kept within the stick's range
+u8 AddStick(u8 own, u8 other)
+{
+    s32 sum = static_cast<s32>(own) + static_cast<s32>(other) - NativeUi::BoundPad::StickMiddle;
+    return static_cast<u8>(std::clamp(sum, 0, 255));
+}
+
+// Player 2's last read put together with player 1's: the sticks' pushes added, either's buttons, the harder trigger
+void MergeSecondPlayer(NativeUi::BoundPad* pad)
+{
+    const NativeUi::BoundPad& other = g_LastSecondPlayer;
+    pad->buttons |= other.buttons;
+    pad->l2Pressure = std::max(pad->l2Pressure, other.l2Pressure);
+    pad->r2Pressure = std::max(pad->r2Pressure, other.r2Pressure);
+    pad->leftX = AddStick(pad->leftX, other.leftX);
+    pad->leftY = AddStick(pad->leftY, other.leftY);
+    pad->rightX = AddStick(pad->rightX, other.rightX);
+    pad->rightY = AddStick(pad->rightY, other.rightY);
+}
 
 // A gamepad kept until it's unplugged, else the first plugged in that the other player hasn't got
 void FindGamepad(SDL_Gamepad** gamepad, SDL_Gamepad* other, const char* who)
@@ -119,16 +141,20 @@ void FindGamepad(SDL_Gamepad** gamepad, SDL_Gamepad* other, const char* who)
     SDL_free(ids);
 }
 
-// Player 1's gamepad: the first, none with co-op's keyboard for player 1
+// Player 1's gamepad: the first (the second's player 2's, unless player 2 has the keyboard)
 void FindGamepad()
 {
-    if (NativeCoop::Enabled() && NativeCoop::KeyboardFirst())
-    {
-        return;
-    }
-
     FindGamepad(&g_Gamepad, g_SecondGamepad, NativeCoop::Enabled() ? "player 1: " : "");
 }
+
+// Whether player 2 plays on the keyboard (co-op's --coop-keyboard): then player 1 has the gamepad alone
+bool KeyboardForPlayerTwo()
+{
+    return NativeCoop::Enabled() && NativeCoop::KeyboardSecond();
+}
+
+// This frame's keys (pressed now or since the last read), read with player 1's pad: player 2's keyboard reads them after it
+bool g_FrameKeys[SDL_SCANCODE_COUNT];
 }
 
 s32 Platform::Pads::Initialise()
@@ -373,7 +399,31 @@ s32 Platform::Pads::Read(s32 port, s32 slot, u8* data)
         g_Latched[key] = false;
     }
 
-    NativeUi::ReadBindings(keys, g_Gamepad, &bound);
+    // Co-op: F6 brings player 2 back beside player 1 (Select on player 2's pad does too)
+    static bool regroupHeld = false;
+    if (keys[SDL_SCANCODE_F6] && !regroupHeld)
+    {
+        NativeCoop::RequestRegroup();
+    }
+
+    regroupHeld = keys[SDL_SCANCODE_F6];
+    // Player 2 on the keyboard: player 1 reads the gamepad alone, the keys kept for player 2's read
+    std::copy(keys, keys + SDL_SCANCODE_COUNT, g_FrameKeys);
+    if (KeyboardForPlayerTwo())
+    {
+        // No keys: the keyboard and the mouse's buttons are player 2's (the mouse's left button spun both Crashes)
+        NativeUi::ReadBindings(nullptr, g_Gamepad, &bound);
+    }
+    else
+    {
+        NativeUi::ReadBindings(keys, g_Gamepad, &bound);
+    }
+    // Co-op: player 2's last read added in while both steer one thing (the Rollerbrawl: coop.cpp)
+    if (NativeCoop::SharesPad())
+    {
+        MergeSecondPlayer(&bound);
+    }
+
     return WriteReport(bound, g_PressureMode, data);
 }
 
@@ -454,7 +504,7 @@ void ReadSecondGamepad(SDL_Gamepad* gamepad, NativeUi::BoundPad* pad)
         {SDL_GAMEPAD_BUTTON_WEST, ButtonSquare},        {SDL_GAMEPAD_BUTTON_NORTH, ButtonTriangle},
         {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ButtonL1},   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, ButtonR1},
         {SDL_GAMEPAD_BUTTON_LEFT_STICK, ButtonL3},      {SDL_GAMEPAD_BUTTON_RIGHT_STICK, ButtonR3},
-        {SDL_GAMEPAD_BUTTON_BACK, ButtonSelect},        {SDL_GAMEPAD_BUTTON_START, ButtonStart},
+        {SDL_GAMEPAD_BUTTON_START, ButtonStart},
         {SDL_GAMEPAD_BUTTON_DPAD_UP, ButtonUp},         {SDL_GAMEPAD_BUTTON_DPAD_DOWN, ButtonDown},
         {SDL_GAMEPAD_BUTTON_DPAD_LEFT, ButtonLeft},     {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ButtonRight},
     };
@@ -476,12 +526,22 @@ void ReadSecondGamepad(SDL_Gamepad* gamepad, NativeUi::BoundPad* pad)
     pad->rightY = StickByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
     NativeUi::Squared(&pad->leftX, &pad->leftY);
     NativeUi::Squared(&pad->rightX, &pad->rightY);
+
+    // Back (Select) is player 2's regroup: brought back beside player 1 when it's pressed
+    static bool backHeld = false;
+    bool back = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
+    if (back && !backHeld)
+    {
+        NativeCoop::RequestRegroup();
+    }
+
+    backHeld = back;
 }
 }
 
 bool NativeCoop::SecondPlayerPresent()
 {
-    return g_SecondOpen && (!Script().empty() || g_SecondGamepad != nullptr);
+    return g_SecondOpen && (!Script().empty() || g_SecondGamepad != nullptr || KeyboardForPlayerTwo());
 }
 
 // Read after port 0 (GamePadController::Update's order), whose read pumped SDL's events
@@ -494,17 +554,42 @@ s32 NativeCoop::ReadSecondPad(u8* data, bool pressureMode)
         const ScriptStep& step = ScriptNow();
         bound.leftX = step.leftX;
         bound.leftY = step.leftY;
-        bound.buttons = step.buttons;
+        bound.buttons = step.buttons & ~ButtonSelect;
+        // Select is the regroup, as Back on a gamepad
+        static bool selectHeld = false;
+        bool select = (step.buttons & ButtonSelect) != 0;
+        if (select && !selectHeld)
+        {
+            NativeCoop::RequestRegroup();
+        }
+
+        selectHeld = select;
+    }
+    else if (KeyboardForPlayerTwo())
+    {
+        // The keyboard by the controls' keyboard bindings (the keys player 1's read took this frame), no gamepad
+        NativeUi::ReadBindings(g_FrameKeys, nullptr, &bound);
+        // Its Select is the regroup, as Back on a gamepad
+        static bool keySelectHeld = false;
+        bool select = (bound.buttons & ButtonSelect) != 0;
+        if (select && !keySelectHeld)
+        {
+            NativeCoop::RequestRegroup();
+        }
+
+        keySelectHeld = select;
+        bound.buttons &= ~ButtonSelect;
     }
     else
     {
-        FindGamepad(&g_SecondGamepad, NativeCoop::KeyboardFirst() ? nullptr : g_Gamepad, "player 2: ");
+        FindGamepad(&g_SecondGamepad, g_Gamepad, "player 2: ");
         if (g_SecondGamepad != nullptr)
         {
             ReadSecondGamepad(g_SecondGamepad, &bound);
         }
     }
 
+    g_LastSecondPlayer = bound;
     return WriteReport(bound, pressureMode, data);
 }
 

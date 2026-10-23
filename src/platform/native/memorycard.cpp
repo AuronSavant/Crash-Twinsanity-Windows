@@ -5,6 +5,7 @@
 // does a real card's
 #include "../ps2/memorycard.h"
 #include "native.h"
+#include "savehistory.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -307,6 +308,8 @@ s32 Platform::MemoryCard::Write(s32 file, const void* buffer, s32 size)
     found->second.stream.write(static_cast<const char*>(buffer), size);
     found->second.stream.flush();
     Native::Log("memory card: %d bytes written to %s", size, found->second.path.filename().string().c_str());
+    // Kept in the saves' history once the save's done (savehistory.cpp)
+    NativeSaveHistory::Written();
     return Finish(FunctionWrite, found->second.stream ? size : ResultFull);
 }
 

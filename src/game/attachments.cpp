@@ -11,6 +11,10 @@
 #include "game/reference.h"
 #include "game/rigidbody.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 // An instance's attachments (its node of kind 6): the instances linked to it, and the path of what's attached to it (instances,
 // AI positions and springs' ends following it in their ways: game/attachment.h's attachments)
 
@@ -896,15 +900,50 @@ u32 AttachmentsNode::CanChangeChunk(ChunkData*, ChunkLinkData* link)
         return 0;
     }
 
+#ifdef TWIN_NATIVE
+    // Co-op (coop.cpp): the two Crashes can end up linked to each other, and the instances each takes along asked the other back
+    // until the stack ran out (a crash entering the first boss's area). An instance already on its way through this link isn't
+    // asked again
+    constexpr u32 MostMoving = 32;
+    static InstanceContext* s_Moving[MostMoving];
+    static u32 s_MovingCount = 0;
+    if (s_MovingCount >= MostMoving)
+    {
+        return 1;
+    }
+
+    s_Moving[s_MovingCount++] = owner;
+#endif
     u32 moved = 1;
     for (u32 index = 0; index < LinkedCount(); index++)
     {
         if (linked[index] != nullptr)
         {
+#ifdef TWIN_NATIVE
+            // One that's gone (freed while still linked: a crash at Jungle Bungle's skateboard with co-op on) isn't asked
+            if (!InstanceLive(linked[index]))
+            {
+                continue;
+            }
+
+            bool onItsWay = false;
+            for (u32 moving = 0; moving < s_MovingCount; moving++)
+            {
+                onItsWay |= s_Moving[moving] == linked[index];
+            }
+
+            if (onItsWay)
+            {
+                continue;
+            }
+#endif
             moved &= linked[index]->ChangeChunk(link) != nullptr;
         }
     }
 
+#ifdef TWIN_NATIVE
+    s_MovingCount--;
+#endif
     return moved;
 }
 
@@ -939,6 +978,14 @@ __attribute__((optimize("no-tree-loop-distribute-patterns"))) void AttachmentsNo
 u32 LinkInstance(void* attachments, InstanceContext* instance, u32 flag)
 {
     AttachmentsNode* node = AsNode(attachments);
+#ifdef TWIN_NATIVE
+    // Co-op (coop.cpp): player 1 and player 2's twin aren't linked to each other, nor an instance to itself (the twin runs the
+    // played character's own scripts, which link "the player")
+    if (instance == node->owner || NativeCoop::Teammates(node->owner, instance))
+    {
+        return 0;
+    }
+#endif
     s32 index = instance != nullptr ? IndexOfLinked(node, instance) : -1;
     if (index >= 0)
     {

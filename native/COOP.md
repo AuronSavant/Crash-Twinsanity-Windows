@@ -39,11 +39,21 @@ game makes a playable character once). `$TWIN_COOP_SPAWN=0` turns it off.
 - **Scripts:** while a script runs for something the twin set off (its runner's originator, behaviours.cpp's
   `BehaviourRunner::Update`), the twin is "the player": a creature bounced on launches whoever bounced on it. Such a script
   doesn't take player 1's control away (commandsgame.cpp's `DisablePlayerControlCommand`).
-- **Damage:** the twin is hurt as player 1 is. A hit that would kill it puts it back at the latest checkpoint instead (a
-  playable character's death restarts the level); player 1 plays on, and for 10 s player 1's control is given back if anything
-  took it in plain play.
+- **Damage:** the twin is hurt as player 1 is. A hit that would kill it puts it back beside player 1 instead (a playable
+  character's death restarts the level); player 1 plays on. Its scripts can't take player 1's control away.
+- **Regroup:** Select (Back) on player 2's pad, or F6, brings player 2 beside player 1 (into player 1's chunk too). After every
+  restart player 2 is brought back the same way, or made again.
+- **Enemies:** while a creature's script runs and the twin is nearer it than player 1, the twin is its player: enemies go for
+  the nearer of the two.
 - **Teammates:** the two don't hurt each other (characterstate.cpp's `CharacterAgent::Contact`).
 - **Restarts and new chunks:** the twin is made again beside player 1.
+
+## Testing aids
+
+- **Save history** (`src/platform/native/savehistory.cpp`): every save the game writes (autosaves at checkpoints included) is
+  kept, the whole memory card copied into `%APPDATA%\Crash Twinsanity\save history\NNN date time area`. `Play\Load
+  Autosave.bat` lists them oldest first, backs up the current card into `save history\_backups` and puts the chosen one back
+  (then LOAD GAME on the main menu).
 
 ## Testing
 

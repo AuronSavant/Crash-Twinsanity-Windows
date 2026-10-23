@@ -28,6 +28,10 @@
 #include "game/layout.h"
 #include "game/sound.h"
 
+#ifdef TWIN_NATIVE
+#include "coop.h"
+#endif
+
 #include <utility>
 
 // The commands that work on the agent's object node, its runner and its levels
@@ -867,6 +871,19 @@ InstanceContext* PlayedCharacter()
     return progress->Instance(progress->play.character);
 }
 
+// The played character, or player 2's twin while a script takes the twin for the player (coop.cpp's TwinAsPlayer). The camera's
+// commands keep the played character's (the camera follows player 1)
+InstanceContext* ScriptPlayedCharacter()
+{
+#ifdef TWIN_NATIVE
+    if (InstanceContext* twin = NativeCoop::ScriptPlayer())
+    {
+        return twin;
+    }
+#endif
+    return PlayedCharacter();
+}
+
 InstanceContext* PlayerInstance()
 {
     return g_PlayerInstance != nullptr ? static_cast<InstanceContext*>(g_PlayerInstance->object) : nullptr;
@@ -930,7 +947,7 @@ void DetachAllLinkedAgentsCommand::Execute(TimeClock*, BehaviourRunner* runner, 
 
 void SetFocusToPlayerCommand::Execute(TimeClock*, BehaviourRunner* runner, BehaviourLevel*)
 {
-    InstanceContext* player = PlayedCharacter();
+    InstanceContext* player = ScriptPlayedCharacter();
     if (player == nullptr)
     {
         return;
@@ -1001,7 +1018,7 @@ void DismissCharacterCommand::Execute(TimeClock*, BehaviourRunner*, BehaviourLev
 // The played character's agent's home chunk is the one it's in (whether there's a character isn't checked)
 void SetCharacterHomeChunkCommand::Execute(TimeClock*, BehaviourRunner*, BehaviourLevel*)
 {
-    InstanceContext* player = PlayedCharacter();
+    InstanceContext* player = ScriptPlayedCharacter();
     auto* node = static_cast<AgentNode*>(GetGameNode(&player->nodes, NodeCharacter));
     static_cast<CharacterAgent*>(node->agent)->homeChunk = player->chunk;
 }

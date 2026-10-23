@@ -147,6 +147,10 @@ GraphState* RunBody(StateBody* body, TimeClock* clock, BehaviourRunner* runner, 
     level->elseBody = nullptr;
     for (ScriptCommand* command = body->commands; command != nullptr; command = command->next)
     {
+#ifdef TWIN_NATIVE
+        // Co-op's throw trace (coop.cpp)
+        NativeCoop::TraceCommand(runner, command->bits.id);
+#endif
         CallVirtual<void>(command, command->vtable, ScriptCommand::ExecuteSlot, clock, runner, level);
     }
 
@@ -569,7 +573,8 @@ u32 BehaviourRunner::Update(TimeClock* clock)
 {
 #ifdef TWIN_NATIVE
     // Co-op: a script started by player 2's twin takes the twin for the player while it runs (coop.cpp)
-    NativeCoop::TwinAsPlayer twinAsPlayer(nextStarter != nullptr ? nextOriginator : originator);
+    NativeCoop::TwinAsPlayer twinAsPlayer(nextStarter != nullptr ? nextOriginator : originator,
+                                          agentNode != nullptr ? agentNode->owner : nullptr);
 #endif
     if (nextStarter != nullptr)
     {
